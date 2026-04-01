@@ -1,0 +1,10 @@
+name = "rag-scheduler"
+main = "scheduler-worker.js"
+compatibility_date = "2026-03-28"
+
+[triggers]
+crons = ["* * * * *"]
+
+[vars]
+# APP_URL = "https://your-app.run.app"
+# SCHEDULER_SECRET = "your-secret-here"

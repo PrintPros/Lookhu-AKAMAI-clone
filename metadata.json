@@ -1,0 +1,5 @@
+{
+  "name": "Remix: RAG.org Fast Channel Platform",
+  "description": "Professional music video playout platform for RAG.org, featuring automated transcoding, artist submissions, and multi-channel HLS stream management.",
+  "requestFramePermissions": []
+}

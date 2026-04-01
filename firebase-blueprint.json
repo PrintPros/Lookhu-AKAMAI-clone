@@ -1,0 +1,117 @@
+{
+  "entities": {
+    "Media": {
+      "title": "Media",
+      "description": "Metadata for uploaded media files",
+      "type": "object",
+      "properties": {
+        "name": { "type": "string" },
+        "m3u8Url": { "type": "string" },
+        "status": { "type": "string", "enum": ["uploading", "transcoding", "ready", "error"] },
+        "duration": { "type": "number" },
+        "createdAt": { "type": "string", "format": "date-time" },
+        "userId": { "type": "string" }
+      },
+      "required": ["name", "m3u8Url", "status", "userId"]
+    },
+    "Channel": {
+      "title": "Channel",
+      "description": "A streaming channel configuration",
+      "type": "object",
+      "properties": {
+        "name": { "type": "string" },
+        "description": { "type": "string" },
+        "playlistId": { "type": "string" },
+        "status": { "type": "string", "enum": ["online", "offline"] },
+        "createdAt": { "type": "string", "format": "date-time" },
+        "userId": { "type": "string" }
+      },
+      "required": ["name", "status", "userId"]
+    },
+    "Playlist": {
+      "title": "Playlist",
+      "description": "A sequence of media items for a channel",
+      "type": "object",
+      "properties": {
+        "name": { "type": "string" },
+        "mediaIds": { "type": "array", "items": { "type": "string" } },
+        "createdAt": { "type": "string", "format": "date-time" },
+        "userId": { "type": "string" }
+      },
+      "required": ["name", "mediaIds", "userId"]
+    },
+    "UserProfile": {
+      "title": "UserProfile",
+      "description": "User profile information",
+      "type": "object",
+      "properties": {
+        "uid": { "type": "string" },
+        "email": { "type": "string", "format": "email" },
+        "displayName": { "type": "string" },
+        "photoURL": { "type": "string", "format": "uri" }
+      },
+      "required": ["uid", "email"]
+    },
+    "AdConfig": {
+      "title": "AdConfig",
+      "description": "VAST ad configuration",
+      "type": "object",
+      "properties": {
+        "id": { "type": "string" },
+        "preRollUrl": { "type": "string" },
+        "midRollUrl": { "type": "string" },
+        "midRollFrequency": { "type": "number" },
+        "enabled": { "type": "boolean" }
+      },
+      "required": ["id", "enabled"]
+    },
+    "ArtistSubmission": {
+      "title": "ArtistSubmission",
+      "description": "A music video submission from an artist",
+      "type": "object",
+      "properties": {
+        "artistName": { "type": "string" },
+        "songTitle": { "type": "string" },
+        "genre": { "type": "string", "enum": ["hiphop", "rock", "edm", "rnb", "latin", "other"] },
+        "email": { "type": "string", "format": "email" },
+        "instagramUrl": { "type": "string" },
+        "twitterUrl": { "type": "string" },
+        "youtubeUrl": { "type": "string" },
+        "websiteUrl": { "type": "string" },
+        "videoFileUrl": { "type": "string" },
+        "m3u8Url": { "type": "string" },
+        "thumbnailUrl": { "type": "string" },
+        "duration": { "type": "number" },
+        "status": { "type": "string", "enum": ["pending", "approved", "rejected"] },
+        "submittedAt": { "type": "string", "format": "date-time" }
+      },
+      "required": ["artistName", "songTitle", "genre", "email", "status", "submittedAt"]
+    },
+    "CloudflareConfig": {
+      "title": "CloudflareConfig",
+      "description": "Cloudflare R2 bucket connection",
+      "type": "object",
+      "properties": {
+        "accountId": { "type": "string" },
+        "apiToken": { "type": "string" },
+        "bucketName": { "type": "string" },
+        "publicBaseUrl": { "type": "string" },
+        "usedBytes": { "type": "number" },
+        "maxBytes": { "type": "number" },
+        "label": { "type": "string" },
+        "isActive": { "type": "boolean" },
+        "userId": { "type": "string" }
+      },
+      "required": ["accountId", "apiToken", "bucketName", "label", "userId"]
+    }
+  },
+  "firestore": {
+    "media": { "schema": "Media", "description": "Media library" },
+    "channels": { "schema": "Channel", "description": "Configured channels" },
+    "playlists": { "schema": "Playlist", "description": "Playlists for channels" },
+    "users": { "schema": "UserProfile", "description": "User profiles" },
+    "cloudflareConfigs": { "schema": "CloudflareConfig", "description": "Cloudflare R2 buckets" },
+    "submissions": { "schema": "ArtistSubmission", "description": "Artist music video submissions" },
+    "settings": { "schema": "AdConfig", "description": "Global platform settings" }
+  }
+}

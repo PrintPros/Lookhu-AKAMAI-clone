@@ -1,0 +1,235 @@
+rules_version = '2';
+service cloud.firestore {
+  match /databases/{database}/documents {
+    // ===============================================================
+    // Assumed Data Model
+    // ===============================================================
+    //
+    // Collection: media
+    // Document ID: auto-generated
+    // Fields:
+    //   - name: string (required, 1-255 chars)
+    //   - m3u8Url: string (required, valid URL)
+    //   - status: string (required, ["uploading", "transcoding", "ready", "error"])
+    //   - duration: number (optional, positive)
+    //   - createdAt: string (required, ISO 8601)
+    //   - userId: string (required, matches auth.uid)
+    //
+    // Collection: channels
+    // Document ID: auto-generated
+    // Fields:
+    //   - name: string (required, 1-100 chars)
+    //   - description: string (optional, 0-500 chars)
+    //   - playlistId: string (optional)
+    //   - status: string (required, ["online", "offline"])
+    //   - createdAt: string (required, ISO 8601)
+    //   - userId: string (required, matches auth.uid)
+    //   - slug: string (optional)
+    //   - r2BucketName: string (optional)
+    //   - workerDeployed: bool (optional)
+    //   - workerNeedsRedeploy: bool (optional)
+    //   - workerManifestUrl: string (optional, URL)
+    //   - lastPublishedAt: string (optional, ISO 8601)
+    //
+    // Collection: playlists
+    // Document ID: auto-generated
+    // Fields:
+    //   - name: string (required, 1-100 chars)
+    //   - mediaIds: list (required, max 100 items)
+    //   - createdAt: string (required, ISO 8601)
+    //   - userId: string (required, matches auth.uid)
+    //
+    // Collection: scheduledPublishes
+    // Document ID: auto-generated
+    // Fields:
+    //   - channelId: string (required)
+    //   - playlistId: string (required)
+    //   - scheduledAt: string (required, ISO 8601)
+    //   - status: string (required, ["pending", "published", "failed"])
+    //   - userId: string (required, matches auth.uid)
+    //   - createdAt: string (required, ISO 8601)
+    //   - error: string (optional)
+    //
+    // Collection: users
+    // Document ID: auth.uid
+    // Fields:
+    //   - uid: string (required)
+    //   - email: string (required, valid email)
+    //   - displayName: string (optional)
+    //   - photoURL: string (optional)
+    //
+    // ===============================================================
+
+    // ===============================================================
+    // Helper Functions
+    // ===============================================================
+    function isAuthenticated() {
+      return request.auth != null;
+    }
+    function isAdmin() {
+      return isAuthenticated() && 
+        (get(/databases/$(database)/documents/users/$(request.auth.uid)).data.role == 'admin' ||
+         (request.auth.token.email == "lookhumaster@gmail.com" && request.auth.token.email_verified == true));
+    }
+    function isOwner(userId) {
+      return isAuthenticated() && request.auth.uid == userId;
+    }
+    function isDocOwner() {
+      return isAuthenticated() && (
+        (request.auth.uid == resource.data.userId) || 
+        (request.auth.uid == resource.data.createdBy)
+      );
+    }
+    function isValidEmail(email) {
+      return email is string && email.matches("^[a-zA-Z0-9._%+-]+@[a-zA-Z0-9.-]+\\.[a-zA-Z]{2,}$");
+    }
+    function isValidUrl(url) {
+      return url is string && (url.matches("^https://.*") || url.matches("^http://.*"));
+    }
+    function isValidDateString(dateStr) {
+      return dateStr is string && dateStr.matches("^\\d{4}-\\d{2}-\\d{2}T\\d{2}:\\d{2}:\\d{2}.*Z?$");
+    }
+    function hasOnlyAllowedFields(fields) {
+      return request.resource.data.keys().hasOnly(fields);
+    }
+
+    // Domain Validators
+    function isValidMedia(data) {
+      return data.name is string && data.name.size() >= 1 && data.name.size() <= 255 &&
+             isValidUrl(data.m3u8Url) &&
+             data.status in ["uploading", "transcoding", "ready", "error"] &&
+             (!('duration' in data) || (data.duration is number && data.duration >= 0)) &&
+             isValidDateString(data.createdAt) &&
+             data.userId == request.auth.uid;
+    }
+
+    function isValidChannel(data) {
+      return data.name is string && data.name.size() >= 1 && data.name.size() <= 100 &&
+             (!('description' in data) || (data.description is string && data.description.size() <= 500)) &&
+             (!('playlistId' in data) || data.playlistId is string) &&
+             data.status in ["online", "offline"] &&
+             isValidDateString(data.createdAt) &&
+             data.userId == request.auth.uid &&
+             (!('slug' in data) || data.slug is string) &&
+             (!('r2BucketName' in data) || data.r2BucketName is string) &&
+             (!('workerDeployed' in data) || data.workerDeployed is bool) &&
+             (!('workerNeedsRedeploy' in data) || data.workerNeedsRedeploy is bool) &&
+             (!('workerManifestUrl' in data) || isValidUrl(data.workerManifestUrl)) &&
+             (!('lastPublishedAt' in data) || isValidDateString(data.lastPublishedAt));
+    }
+
+    function isValidPlaylist(data) {
+      return data.name is string && data.name.size() >= 1 && data.name.size() <= 100 &&
+             data.mediaIds is list && data.mediaIds.size() <= 100 &&
+             isValidDateString(data.createdAt) &&
+             data.userId == request.auth.uid;
+    }
+
+    function isValidScheduledPublish(data) {
+      return data.channelId is string &&
+             data.playlistId is string &&
+             isValidDateString(data.scheduledAt) &&
+             data.status in ["pending", "published", "failed", "cancelled"] &&
+             data.createdBy == request.auth.uid &&
+             (!('error' in data) || data.error is string) &&
+             isValidDateString(data.createdAt);
+    }
+
+    function isValidUser(data) {
+      return data.uid == request.auth.uid &&
+             isValidEmail(data.email) &&
+             (!('displayName' in data) || (data.displayName is string && data.displayName.size() <= 100)) &&
+             (!('photoURL' in data) || isValidUrl(data.photoURL));
+    }
+
+    function isValidCloudflareConfig(data) {
+      return data.accountId is string && data.accountId.size() >= 1 &&
+             (!('cfApiToken' in data) || (data.cfApiToken is string && data.cfApiToken.size() >= 1)) &&
+             (!('apiToken' in data) || (data.apiToken is string && data.apiToken.size() >= 1)) &&
+             data.bucketName is string && data.bucketName.size() >= 1 &&
+             data.label is string && data.label.size() >= 1 &&
+             data.userId == request.auth.uid &&
+             (!('r2AccessKeyId' in data) || data.r2AccessKeyId is string) &&
+             (!('r2SecretAccessKey' in data) || data.r2SecretAccessKey is string) &&
+             (!('publicBaseUrl' in data) || isValidUrl(data.publicBaseUrl)) &&
+             (!('usedBytes' in data) || data.usedBytes is number) &&
+             (!('maxBytes' in data) || data.maxBytes is number) &&
+             (!('isActive' in data) || data.isActive is bool) &&
+             (!('isFull' in data) || data.isFull is bool);
+    }
+
+    function isValidSubmission(data) {
+      return data.artistName is string && data.artistName.size() >= 1 &&
+             data.songTitle is string && data.songTitle.size() >= 1 &&
+             data.email is string && isValidEmail(data.email) &&
+             data.genre in ["hiphop", "rock", "edm", "rnb", "latin", "other"] &&
+             data.status in ["pending", "approved", "rejected"] &&
+             isValidDateString(data.submittedAt) &&
+             (!('videoFileUrl' in data) || isValidUrl(data.videoFileUrl)) &&
+             (!('m3u8Url' in data) || isValidUrl(data.m3u8Url)) &&
+             (!('thumbnailUrl' in data) || isValidUrl(data.thumbnailUrl)) &&
+             (!('duration' in data) || (data.duration is number && data.duration >= 0));
+    }
+
+    function isValidAdConfig(data) {
+      return data.enabled is bool &&
+             (!('preRollUrl' in data) || isValidUrl(data.preRollUrl)) &&
+             (!('midRollUrl' in data) || isValidUrl(data.midRollUrl)) &&
+             (!('midRollFrequency' in data) || (data.midRollFrequency is number && data.midRollFrequency >= 1));
+    }
+
+    match /media/{mediaId} {
+      allow read: if true; // Media metadata is public for player access
+      allow create: if isAuthenticated() && isValidMedia(request.resource.data);
+      allow update: if isAuthenticated() && isDocOwner() && isValidMedia(request.resource.data);
+      allow delete: if isAuthenticated() && isDocOwner();
+    }
+
+    match /channels/{channelId} {
+      allow read: if true; // Channels are public for viewers
+      allow create: if isAuthenticated() && isValidChannel(request.resource.data);
+      allow update: if isAuthenticated() && isDocOwner() && isValidChannel(request.resource.data);
+      allow delete: if isAuthenticated() && isDocOwner();
+    }
+
+    match /playlists/{playlistId} {
+      allow read: if true; // Playlists are public for player access
+      allow create: if isAuthenticated() && isValidPlaylist(request.resource.data);
+      allow update: if isAuthenticated() && isDocOwner() && isValidPlaylist(request.resource.data);
+      allow delete: if isAuthenticated() && isDocOwner();
+    }
+
+    match /scheduledPublishes/{publishId} {
+      allow read: if isAuthenticated() && isDocOwner();
+      allow create: if isAuthenticated() && isValidScheduledPublish(request.resource.data);
+      allow update: if isAuthenticated() && isDocOwner() && isValidScheduledPublish(request.resource.data);
+      allow delete: if isAuthenticated() && isDocOwner();
+    }
+    
+    match /users/{userId} {
+      allow read: if isAuthenticated();
+      allow create: if isAuthenticated() && isOwner(userId) && isValidUser(request.resource.data);
+      allow update: if isAuthenticated() && isOwner(userId) && isValidUser(request.resource.data);
+    }
+
+    match /cloudflareConfigs/{configId} {
+      allow read: if (request.auth != null && request.auth.uid == resource.data.userId)
+        || resource.data.isActive == true;
+      allow create: if request.auth != null
+        && request.auth.uid == request.resource.data.userId && isValidCloudflareConfig(request.resource.data);
+      allow update: if request.auth != null
+        && request.auth.uid == resource.data.userId && isValidCloudflareConfig(request.resource.data);
+      allow delete: if request.auth != null && request.auth.uid == resource.data.userId;
+    }
+
+    match /submissions/{submissionId} {
+      allow read: if request.auth != null;
+      allow create: if true; // public — artists submit without login
+      allow update, delete: if request.auth != null;
+    }
+
+    match /settings/{docId} {
+      allow read, write: if request.auth != null;
+    }
+  }
+}
