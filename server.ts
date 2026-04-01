@@ -37,7 +37,7 @@ try {
   } else {
     adminApp = apps[0];
   }
-  dbAdmin = getFirestore(adminApp);
+  dbAdmin = getFirestore(adminApp, firebaseConfig.firestoreDatabaseId || "(default)");
   authAdmin = getAuth(adminApp);
   console.log("Firebase Admin ready");
 } catch (err) {
@@ -378,6 +378,18 @@ async function startServer() {
         writeStream.on("error", reject);
       });
 
+      // 2. Get duration from the downloaded MP4 before transcoding
+      const duration: number = await new Promise((resolve, reject) => {
+        ffmpeg.ffprobe(rawPath, (err: any, data: any) => {
+          if (err) return reject(new Error(`ffprobe failed: ${err.message}`));
+          const d =
+            data?.format?.duration ||
+            data?.streams?.find((s: any) => s.codec_type === "video")?.duration;
+          if (!d || parseFloat(d) <= 0) return reject(new Error("ffprobe returned invalid duration"));
+          resolve(parseFloat(d));
+        });
+      });
+
       // 2. Transcode to HLS segments
       const m3u8Path = path.join(segDir, "index.m3u8");
       await new Promise<void>((resolve, reject) => {
@@ -403,12 +415,7 @@ async function startServer() {
           .run();
       });
 
-      // 3. Get duration
-      const duration: number = await new Promise((resolve) => {
-        ffmpeg.ffprobe(rawPath, (err: any, data: any) => {
-          resolve(data?.format?.duration || 0);
-        });
-      });
+      // 3. Duration already captured above
 
       // 4. Upload segments to R2
       const files = fs.readdirSync(segDir);
@@ -430,26 +437,22 @@ async function startServer() {
       // 5. Count segments
       const segmentCount = files.filter(f => f.endsWith(".ts")).length;
 
-      // 6. Save to Firestore (use direct REST API since SDK may fail on Cloud Run)
-      const firestoreUrl = `https://firestore.googleapis.com/v1/projects/${firebaseConfig.projectId}/databases/${firebaseConfig.firestoreDatabaseId}/documents/media/${mediaId}`;
-
-      const firestoreBody = {
-        fields: {
-          status: { stringValue: "ready" },
-          m3u8Url: { stringValue: `${publicBaseUrl}/streams/${videoId}/index.m3u8` },
-          segmentCount: { integerValue: segmentCount },
-          duration: { doubleValue: duration },
-          segmentDuration: { integerValue: 6 },
-          segmentPrefix: { stringValue: "segment_" },
-          segmentPad: { integerValue: 4 },
-        }
-      };
-
-      await fetch(`${firestoreUrl}?updateMask.fieldPaths=status&updateMask.fieldPaths=m3u8Url&updateMask.fieldPaths=segmentCount&updateMask.fieldPaths=duration&updateMask.fieldPaths=segmentDuration&updateMask.fieldPaths=segmentPrefix&updateMask.fieldPaths=segmentPad`, {
-        method: "PATCH",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify(firestoreBody),
-      });
+      // 6. Save to Firestore via Admin SDK
+      if (mediaId && dbAdmin) {
+        await dbAdmin.collection("media").doc(mediaId).set({
+          status: "ready",
+          m3u8Url: `${publicBaseUrl}/streams/${videoId}/index.m3u8`,
+          segmentCount,
+          duration,
+          segmentDuration: 6,
+          segmentPrefix: "segment_",
+          segmentPad: 4,
+          r2Path: `streams/${videoId}`,
+          bucketName,
+        }, { merge: true });
+      } else {
+        console.warn("Skipping Firestore update — dbAdmin unavailable or no mediaId");
+      }
 
       // 7. Delete original MP4 now that segments are confirmed
       try {
@@ -477,19 +480,11 @@ async function startServer() {
 
       try {
         const { mediaId } = req.body;
-        if (mediaId) {
-          const firestoreUrl = `https://firestore.googleapis.com/v1/projects/${firebaseConfig.projectId}/databases/${firebaseConfig.firestoreDatabaseId}/documents/media/${mediaId}`;
-          const firestoreBody = {
-            fields: {
-              status: { stringValue: "error" },
-              errorMessage: { stringValue: err.message }
-            }
-          };
-          await fetch(`${firestoreUrl}?updateMask.fieldPaths=status&updateMask.fieldPaths=errorMessage`, {
-            method: "PATCH",
-            headers: { "Content-Type": "application/json" },
-            body: JSON.stringify(firestoreBody),
-          });
+        if (mediaId && dbAdmin) {
+          await dbAdmin.collection("media").doc(mediaId).set({
+            status: "error",
+            errorMessage: err.message,
+          }, { merge: true });
         }
       } catch (e) {
         console.error("Failed to update error status in Firestore:", e);
