@@ -4,10 +4,12 @@ import path from "path";
 import fs from "fs";
 import multer from "multer";
 import ffmpegStatic from "ffmpeg-static";
+import ffprobeStatic from "ffprobe-static";
 import ffmpeg from "fluent-ffmpeg";
 import cors from "cors";
 
 ffmpeg.setFfmpegPath(ffmpegStatic as string);
+ffmpeg.setFfprobePath(ffprobeStatic.path);
 import { v4 as uuidv4 } from "uuid";
 import { S3Client, PutObjectCommand, ListObjectsV2Command,
          GetObjectCommand, DeleteObjectCommand } from "@aws-sdk/client-s3";
