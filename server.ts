@@ -4,12 +4,10 @@ import path from "path";
 import fs from "fs";
 import multer from "multer";
 import ffmpegStatic from "ffmpeg-static";
-import ffprobeStatic from "ffprobe-static";
 import ffmpeg from "fluent-ffmpeg";
 import cors from "cors";
 
 ffmpeg.setFfmpegPath(ffmpegStatic as string);
-ffmpeg.setFfprobePath(ffprobeStatic.path);
 import { v4 as uuidv4 } from "uuid";
 import { S3Client, PutObjectCommand, ListObjectsV2Command,
          GetObjectCommand, DeleteObjectCommand } from "@aws-sdk/client-s3";
@@ -380,18 +378,6 @@ async function startServer() {
         writeStream.on("error", reject);
       });
 
-      // 2. Get duration from the downloaded MP4 before transcoding
-      const duration: number = await new Promise((resolve, reject) => {
-        ffmpeg.ffprobe(rawPath, (err: any, data: any) => {
-          if (err) return reject(new Error(`ffprobe failed: ${err.message}`));
-          const d =
-            data?.format?.duration ||
-            data?.streams?.find((s: any) => s.codec_type === "video")?.duration;
-          if (!d || parseFloat(d) <= 0) return reject(new Error("ffprobe returned invalid duration"));
-          resolve(parseFloat(d));
-        });
-      });
-
       // 2. Transcode to HLS segments
       const m3u8Path = path.join(segDir, "index.m3u8");
       await new Promise<void>((resolve, reject) => {
@@ -417,7 +403,12 @@ async function startServer() {
           .run();
       });
 
-      // 3. Duration already captured above
+      // 3. Get duration
+      const duration: number = await new Promise((resolve) => {
+        ffmpeg.ffprobe(rawPath, (err: any, data: any) => {
+          resolve(data?.format?.duration || 0);
+        });
+      });
 
       // 4. Upload segments to R2
       const files = fs.readdirSync(segDir);
