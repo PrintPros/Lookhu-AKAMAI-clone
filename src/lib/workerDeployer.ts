@@ -3,120 +3,236 @@
  */
 const CHANNEL_WORKER_TEMPLATE = `
 export default {
-  async fetch(request, env) {
+  async fetch(request, env, ctx) {
     const url = new URL(request.url);
-    const channelSlug = env.CHANNEL_SLUG;
-    const manifestUrl = \`\${env.MANIFEST_BUCKET_URL}/channels/\${channelSlug}/manifest.json\`;
-    const epoch = parseInt(env.EPOCH || "0");
+    const { pathname } = url;
 
-    // 1. Fetch the manifest
-    const manifestResponse = await fetch(manifestUrl, { cf: { cacheTtl: 60 } });
-    if (!manifestResponse.ok) {
-      return new Response("Manifest not found", { status: 404 });
-    }
-    const manifest = await manifestResponse.json();
+    const corsHeaders = {
+      "Access-Control-Allow-Origin": "*",
+      "Access-Control-Allow-Methods": "GET, OPTIONS",
+      "Access-Control-Allow-Headers": "*",
+    };
 
-    // 2. Handle health check
-    if (url.pathname === "/health") {
-      const now = Math.floor(Date.now() / 1000);
-      const elapsed = now - epoch;
-      const totalDuration = manifest.programs.reduce((acc, p) => acc + (p.durationSeconds || (p.segments * manifest.segmentDuration)), 0);
-      const loopPosition = elapsed % totalDuration;
-      return new Response(JSON.stringify({
-        status: "ok",
-        channel: manifest.channel,
-        now,
-        epoch,
-        elapsed,
-        totalDuration,
-        loopPosition
-      }), { headers: { "Content-Type": "application/json" } });
+    if (request.method === "OPTIONS") {
+      return new Response(null, { headers: corsHeaders });
     }
 
-    // 3. Handle M3U8 playlist request
-    if (url.pathname.endsWith(".m3u8")) {
-      const now = Math.floor(Date.now() / 1000);
-      const elapsed = now - epoch;
-      
-      const segmentDuration = manifest.segmentDuration || 6;
-      const windowSize = manifest.window || 10;
-      
-      // Calculate total duration
-      let totalDuration = 0;
-      const programs = manifest.programs.map(p => {
-        const duration = p.durationSeconds || (p.segments * segmentDuration);
-        const startOffset = totalDuration;
-        totalDuration += duration;
-        return { ...p, startOffset, duration };
-      });
-
-      const loopPosition = elapsed % totalDuration;
-      const currentGlobalSegment = Math.floor(elapsed / segmentDuration);
-      
-      let playlist = "#EXTM3U\\n";
-      playlist += "#EXT-X-VERSION:3\\n";
-      playlist += \`#EXT-X-TARGETDURATION:\${segmentDuration}\\n\`;
-      playlist += \`#EXT-X-MEDIA-SEQUENCE:\${currentGlobalSegment}\\n\\n\`;
-
-      for (let i = 0; i < windowSize; i++) {
-        const segmentIndex = currentGlobalSegment + i;
-        const segmentTime = segmentIndex * segmentDuration;
-        const segmentLoopTime = segmentTime % totalDuration;
-        
-        // Find which program this segment belongs to
-        let activeProgram = programs[0];
-        for (const p of programs) {
-          if (segmentLoopTime >= p.startOffset && segmentLoopTime < p.startOffset + p.duration) {
-            activeProgram = p;
-            break;
-          }
-        }
-
-        const programSegmentIndex = Math.floor((segmentLoopTime - activeProgram.startOffset) / segmentDuration);
-        
-        // Add discontinuity if this is the first segment of a program AND NOT the first segment of the playlist
-        if (programSegmentIndex === 0 && i > 0) {
-          playlist += "#EXT-X-DISCONTINUITY\\n";
-        }
-
-        const segmentFilename = \`\${activeProgram.prefix}\${String(programSegmentIndex).padStart(activeProgram.pad, "0")}.ts\`;
-        playlist += \`#EXTINF:\${segmentDuration},\\n\`;
-        playlist += \`\${url.origin}/segments/\${activeProgram.id}/\${segmentFilename}\\n\`;
-      }
-
-      return new Response(playlist, {
-        headers: {
-          "Content-Type": "application/x-mpegURL",
-          "Access-Control-Allow-Origin": "*",
-          "Cache-Control": "public, max-age=2"
-        }
-      });
+    if (pathname === "/health" || pathname === "/") {
+      return handleHealth(env, ctx, corsHeaders);
+    }
+    if (pathname === "/live.m3u8" || pathname === "/index.m3u8" || pathname.endsWith(".m3u8")) {
+      return handlePlaylist(request, env, ctx, corsHeaders);
+    }
+    if (pathname === "/now.json") {
+      return handleNow(env, ctx, corsHeaders);
+    }
+    if (pathname === "/epg.xml") {
+      return handleEPG(env, ctx, corsHeaders);
+    }
+    if (pathname.startsWith("/segments/")) {
+      return handleSegment(request, env, ctx, corsHeaders);
     }
 
-    // 4. Handle segment proxying
-    if (url.pathname.startsWith("/segments/")) {
-      const parts = url.pathname.split("/");
-      const programId = parts[2];
-      const filename = parts[3];
-
-      const program = manifest.programs.find(p => p.id === programId);
-      if (!program) return new Response("Program not found", { status: 404 });
-
-      const segmentUrl = \`\${program.publicBaseUrl}/\${program.path}/\${filename}\`;
-      const segmentResponse = await fetch(segmentUrl, { cf: { cacheTtl: 3600 } });
-      
-      const headers = new Headers(segmentResponse.headers);
-      headers.set("Access-Control-Allow-Origin", "*");
-      
-      return new Response(segmentResponse.body, {
-        status: segmentResponse.status,
-        headers
-      });
-    }
-
-    return new Response("Not Found", { status: 404 });
+    return new Response("Not Found", { status: 404, headers: corsHeaders });
   }
 };
+
+async function getManifest(env, ctx) {
+  const cache = caches.default;
+  const manifestUrl = \`\${env.MANIFEST_BUCKET_URL}/channels/\${env.CHANNEL_SLUG}/manifest.json\`;
+  let response = await cache.match(manifestUrl);
+  if (!response) {
+    response = await fetch(manifestUrl);
+    if (!response.ok) throw new Error(\`Manifest fetch failed: \${response.status}\`);
+    const cloned = new Response(response.body, response);
+    cloned.headers.set("Cache-Control", "public, max-age=30");
+    ctx.waitUntil(cache.put(manifestUrl, cloned.clone()));
+    return cloned.json();
+  }
+  return response.json();
+}
+
+function getCurrentPosition(manifest, env) {
+  const epoch = parseInt(env.EPOCH || "0");
+  const now = Math.floor(Date.now() / 1000);
+  const elapsed = now - epoch;
+  const segDur = manifest.segmentDuration || 6;
+
+  const allSegments = [];
+  for (const program of manifest.programs) {
+    for (let i = 0; i < program.segments; i++) {
+      allSegments.push({ program, segIndex: i });
+    }
+  }
+
+  const totalSegments = allSegments.length;
+  const loopDuration = totalSegments * segDur;
+  const loopPosition = elapsed % loopDuration;
+  const currentFlatIndex = Math.floor(loopPosition / segDur);
+  const globalSeq = Math.floor(elapsed / segDur);
+
+  return { allSegments, totalSegments, currentFlatIndex, globalSeq, now, epoch, elapsed, segDur, loopDuration };
+}
+
+async function handlePlaylist(request, env, ctx, corsHeaders) {
+  const DVR_SEGMENTS = 30;
+
+  try {
+    const manifest = await getManifest(env, ctx);
+    const { allSegments, totalSegments, currentFlatIndex, globalSeq, now, segDur } = getCurrentPosition(manifest, env);
+
+    if (totalSegments === 0) {
+      return new Response("#EXTM3U\\n# No content", {
+        headers: { ...corsHeaders, "Content-Type": "application/x-mpegURL" }
+      });
+    }
+
+    const startFlatIndex = ((currentFlatIndex - DVR_SEGMENTS) % totalSegments + totalSegments) % totalSegments;
+    const startSeq = globalSeq - DVR_SEGMENTS;
+
+    let playlist = "#EXTM3U\\n";
+    playlist += "#EXT-X-VERSION:3\\n";
+    playlist += \`#EXT-X-TARGETDURATION:\${segDur}\\n\`;
+    playlist += \`#EXT-X-MEDIA-SEQUENCE:\${startSeq}\\n\`;
+    playlist += \`#EXT-X-DISCONTINUITY-SEQUENCE:0\\n\`;
+
+    let lastProgram = null;
+    let segmentTime = now - (DVR_SEGMENTS * segDur);
+
+    for (let i = 0; i < DVR_SEGMENTS; i++) {
+      const flatIndex = (startFlatIndex + i) % totalSegments;
+      const { program, segIndex } = allSegments[flatIndex];
+
+      if (lastProgram !== null && program.id !== lastProgram.id) {
+        playlist += "#EXT-X-DISCONTINUITY\\n";
+      }
+
+      playlist += \`#EXT-X-PROGRAM-DATE-TIME:\${new Date(segmentTime * 1000).toISOString()}\\n\`;
+      const segmentFilename = \`\${program.prefix}\${String(segIndex).padStart(program.pad, "0")}.ts\`;
+      playlist += \`#EXTINF:\${segDur},\\n\`;
+      playlist += \`/segments/\${program.id}/\${segmentFilename}\\n\`;
+
+      lastProgram = program;
+      segmentTime += segDur;
+    }
+
+    return new Response(playlist, {
+      headers: { ...corsHeaders, "Content-Type": "application/x-mpegURL", "Cache-Control": "public, max-age=2" }
+    });
+
+  } catch (err) {
+    return new Response(\`#EXTM3U\\n# Error: \${err.message}\`, {
+      headers: { ...corsHeaders, "Content-Type": "application/x-mpegURL" }
+    });
+  }
+}
+
+async function handleNow(env, ctx, corsHeaders) {
+  try {
+    const manifest = await getManifest(env, ctx);
+    const { allSegments, currentFlatIndex, segDur, now } = getCurrentPosition(manifest, env);
+    const { program, segIndex } = allSegments[currentFlatIndex];
+    return new Response(JSON.stringify({
+      now,
+      artistName: program.artistName,
+      songTitle: program.songTitle,
+      segmentIndex: segIndex,
+      program: program.id,
+    }, null, 2), {
+      headers: { ...corsHeaders, "Content-Type": "application/json" }
+    });
+  } catch (err) {
+    return new Response(JSON.stringify({ error: err.message }), {
+      status: 500, headers: { ...corsHeaders, "Content-Type": "application/json" }
+    });
+  }
+}
+
+async function handleEPG(env, ctx, corsHeaders) {
+  try {
+    const manifest = await getManifest(env, ctx);
+    const { epoch, segDur } = getCurrentPosition(manifest, env);
+    const channelId = env.CHANNEL_SLUG;
+
+    let xml = \`<?xml version="1.0" encoding="UTF-8"?>\\n<tv>\\n\`;
+    let t = epoch;
+
+    for (const program of manifest.programs) {
+      const programDuration = program.segments * segDur;
+      const startStr = new Date(t * 1000).toISOString().replace(/[-:]/g, "").replace("T", "").split(".")[0] + " +0000";
+      const endStr = new Date((t + programDuration) * 1000).toISOString().replace(/[-:]/g, "").replace("T", "").split(".")[0] + " +0000";
+      xml += \`  <programme start="\${startStr}" stop="\${endStr}" channel="\${channelId}">\\n\`;
+      xml += \`    <title>\${(program.songTitle || program.id).replace(/&/g, "&amp;")}\\n\`;
+      xml += \`    <desc>\${(program.artistName || "Unknown Artist").replace(/&/g, "&amp;")}</desc>\\n\`;
+      xml += \`    <category>Music</category>\\n\`;
+      xml += \`  </programme>\\n\`;
+      t += programDuration;
+    }
+
+    xml += "</tv>";
+    return new Response(xml, {
+      headers: { ...corsHeaders, "Content-Type": "application/xml", "Cache-Control": "public, max-age=60" }
+    });
+  } catch (err) {
+    return new Response(\`<?xml version="1.0"?><tv><!-- Error: \${err.message} --></tv>\`, {
+      headers: { ...corsHeaders, "Content-Type": "application/xml" }
+    });
+  }
+}
+
+async function handleSegment(request, env, ctx, corsHeaders) {
+  try {
+    const manifest = await getManifest(env, ctx);
+    const parts = request.url.split("/segments/")[1].split("/");
+    if (parts.length < 2) {
+      return new Response("Invalid segment path", { status: 400, headers: corsHeaders });
+    }
+    const programId = parts[0];
+    const fileName = parts[1];
+    const program = manifest.programs.find(p => p.id === programId);
+    if (!program) {
+      return new Response("Program not found", { status: 404, headers: corsHeaders });
+    }
+    const segmentUrl = \`\${program.publicBaseUrl}/\${program.path}/\${fileName}\`;
+    const cache = caches.default;
+    let response = await cache.match(segmentUrl);
+    if (!response) {
+      response = await fetch(segmentUrl);
+      if (!response.ok) {
+        return new Response("Segment not found", { status: 404, headers: corsHeaders });
+      }
+      const cached = new Response(response.body, response);
+      cached.headers.set("Cache-Control", "public, max-age=31536000, immutable");
+      cached.headers.set("Access-Control-Allow-Origin", "*");
+      ctx.waitUntil(cache.put(segmentUrl, cached.clone()));
+      return cached;
+    }
+    return response;
+  } catch (err) {
+    return new Response(\`Segment error: \${err.message}\`, { status: 500, headers: corsHeaders });
+  }
+}
+
+async function handleHealth(env, ctx, corsHeaders) {
+  try {
+    const manifest = await getManifest(env, ctx);
+    const pos = getCurrentPosition(manifest, env);
+    return new Response(JSON.stringify({
+      status: "ok",
+      channel: env.CHANNEL_SLUG,
+      programs: manifest.programs.length,
+      totalSegments: pos.totalSegments,
+      loopDuration: pos.loopDuration,
+      currentSegment: pos.currentFlatIndex,
+    }, null, 2), {
+      headers: { ...corsHeaders, "Content-Type": "application/json" }
+    });
+  } catch (err) {
+    return new Response(JSON.stringify({ status: "error", error: err.message }), {
+      status: 500, headers: { ...corsHeaders, "Content-Type": "application/json" }
+    });
+  }
+}
 `;
 
 /**
