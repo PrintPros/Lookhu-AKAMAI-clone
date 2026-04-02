@@ -83,20 +83,69 @@ export function ArtistPortal() {
     setUploadProgress(0);
 
     try {
-      setStatus("Submitting information...");
+      setStatus("Preparing upload...");
       
-      const token = await auth.currentUser?.getIdToken();
+      const fileKey = `uploads/${crypto.randomUUID()}.mp4`;
+      
+      // 1. Get presigned URL
+      const presignRes = await fetch("/api/r2/presign-batch", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          accountId: activeConfig.accountId,
+          r2AccessKeyId: activeConfig.r2AccessKeyId,
+          r2SecretAccessKey: activeConfig.r2SecretAccessKey,
+          bucketName: activeConfig.bucketName,
+          keys: [{ key: fileKey, contentType: file.type }]
+        })
+      });
+
+      if (!presignRes.ok) throw new Error("Failed to get upload URL");
+      const { urls } = await presignRes.json();
+      const uploadUrl = urls[0].uploadUrl;
+
+      // 2. Upload to R2
+      setStatus("Uploading video...");
+      const uploadXhr = new XMLHttpRequest();
+      
+      const uploadPromise = new Promise((resolve, reject) => {
+        uploadXhr.open("PUT", uploadUrl);
+        uploadXhr.setRequestHeader("Content-Type", file.type);
+        
+        uploadXhr.upload.onprogress = (e) => {
+          if (e.lengthComputable) {
+            const percent = Math.round((e.loaded / e.total) * 100);
+            setUploadProgress(percent);
+          }
+        };
+
+        uploadXhr.onload = () => {
+          if (uploadXhr.status >= 200 && uploadXhr.status < 300) resolve(null);
+          else reject(new Error("Upload failed"));
+        };
+        
+        uploadXhr.onerror = () => reject(new Error("Network error during upload"));
+        uploadXhr.send(file);
+      });
+
+      await uploadPromise;
+
+      // 3. Submit metadata
+      setStatus("Finalizing submission...");
+      
+      const videoFileUrl = `${activeConfig.publicBaseUrl}/${fileKey}`;
+      
       const res = await fetch("/api/submission", {
         method: "POST",
         headers: {
-          "Content-Type": "application/json",
-          "Authorization": `Bearer ${token}`
+          "Content-Type": "application/json"
         },
         body: JSON.stringify({
           ...formData,
           configId: activeConfig.id,
-          // Note: File upload will be handled in a future step
-          // For now we just submit the metadata
+          videoFileUrl,
+          mp4Key: fileKey,
+          status: "pending"
         })
       });
 

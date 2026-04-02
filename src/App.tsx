@@ -1,6 +1,6 @@
 import { useState, useEffect } from "react";
 import { db, auth } from "./firebase";
-import { collection, query, where, onSnapshot } from "firebase/firestore";
+import { collection, query, where, onSnapshot, doc, getDoc } from "firebase/firestore";
 import { onAuthStateChanged, signOut } from "firebase/auth";
 import { Sidebar } from "./components/Sidebar";
 import { Dashboard } from "./components/Dashboard";
@@ -16,14 +16,19 @@ import { EPGViewer } from "./components/EPGViewer";
 import { AdSettings } from "./components/AdSettings";
 import { Auth } from "./components/Auth";
 import { ArtistPortal } from "./components/ArtistPortal";
+import { AdminDashboard } from "./components/AdminDashboard";
+import { InviteManager } from "./components/InviteManager";
+import { InvitationList } from "./components/InvitationList";
 import { motion, AnimatePresence } from "framer-motion";
 import { Toaster } from "sonner";
 
 export default function App() {
   const [user, setUser] = useState<any>(null);
+  const [profile, setProfile] = useState<any>(null);
   const [loading, setLoading] = useState(true);
   const [activeTab, setActiveTab] = useState("dashboard");
   const [pendingCount, setPendingCount] = useState(0);
+  const [pendingInvites, setPendingInvites] = useState(0);
 
   // Handle routes
   const isEmbed = window.location.pathname.startsWith("/embed/");
@@ -31,25 +36,27 @@ export default function App() {
   const isSubmitPortal = window.location.pathname === "/submit";
 
   useEffect(() => {
-    console.log("Setting up onAuthStateChanged listener...");
-
-    // Timeout fallback — if auth doesn't respond in 5 seconds, stop loading
-    const timeout = setTimeout(() => {
-      console.warn("Auth timeout — proceeding without auth");
-      setLoading(false);
-    }, 5000);
-
-    const unsubscribe = onAuthStateChanged(auth, (u) => {
-      console.log("Auth state changed. User:", u ? u.uid : "null");
-      clearTimeout(timeout);
+    const unsubscribe = onAuthStateChanged(auth, async (u) => {
       setUser(u);
+      if (u) {
+        const userDoc = await getDoc(doc(db, "users", u.uid));
+        if (userDoc.exists()) {
+          const data = userDoc.data();
+          if (u.email === "lookhumaster@gmail.com" || u.email === "rpduece@gmail.com") {
+            data.role = "master_admin";
+          }
+          setProfile(data);
+        } else if (u.email === "lookhumaster@gmail.com" || u.email === "rpduece@gmail.com") {
+          // Fallback for master admins if doc doesn't exist yet
+          setProfile({ role: "master_admin", email: u.email, uid: u.uid });
+        }
+      } else {
+        setProfile(null);
+      }
       setLoading(false);
     });
 
-    return () => {
-      clearTimeout(timeout);
-      unsubscribe();
-    };
+    return () => unsubscribe();
   }, []);
 
   useEffect(() => {
@@ -60,10 +67,24 @@ export default function App() {
       collection(db, "submissions"),
       where("status", "==", "pending")
     );
-    const unsubscribe = onSnapshot(submissionsQ, (snap) => {
+    const unsubSubmissions = onSnapshot(submissionsQ, (snap) => {
       setPendingCount(snap.size);
     });
-    return () => unsubscribe();
+
+    // Listen for pending invitations for this user
+    const invitesQ = query(
+      collection(db, "invitations"),
+      where("email", "==", user.email),
+      where("status", "==", "pending")
+    );
+    const unsubInvites = onSnapshot(invitesQ, (snap) => {
+      setPendingInvites(snap.size);
+    });
+
+    return () => {
+      unsubSubmissions();
+      unsubInvites();
+    };
   }, [user]);
 
   const handleLogout = async () => {
@@ -116,6 +137,12 @@ export default function App() {
         return <AdSettings />;
       case "settings":
         return <PlatformSettings />;
+      case "admin":
+        return <AdminDashboard />;
+      case "invites":
+        return <InviteManager accountId={profile?.accountId} />;
+      case "my-invites":
+        return <InvitationList userEmail={user.email} />;
       default:
         return <Dashboard />;
     }
@@ -129,6 +156,8 @@ export default function App() {
         setActiveTab={setActiveTab} 
         onLogout={handleLogout} 
         pendingSubmissions={pendingCount}
+        pendingInvites={pendingInvites}
+        role={profile?.role}
       />
       
       <main className="flex-1 overflow-y-auto p-8">

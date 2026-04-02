@@ -151,21 +151,46 @@ async function handleNow(env, ctx, corsHeaders) {
 async function handleEPG(env, ctx, corsHeaders) {
   try {
     const manifest = await getManifest(env, ctx);
-    const { epoch, segDur } = getCurrentPosition(manifest, env);
-    const channelId = env.CHANNEL_SLUG;
+    const { allSegments, totalSegments, epoch, segDur } = getCurrentPosition(manifest, env);
 
-    let xml = \`<?xml version="1.0" encoding="UTF-8"?>\\n<tv>\\n\`;
-    let t = epoch;
+    if (totalSegments === 0) {
+      return new Response('<?xml version="1.0"?><tv></tv>', {
+        headers: { ...corsHeaders, "Content-Type": "application/xml" }
+      });
+    }
 
-    for (const program of manifest.programs) {
+    const now = Math.floor(Date.now() / 1000);
+    const windowStart = now - 3600;
+    const windowEnd = now + 86400;
+
+    const channelId = \`rag-\${env.CHANNEL_SLUG}\`;
+    let xml = '<?xml version="1.0" encoding="UTF-8"?>\\n';
+    xml += '<tv generator-info-name="RAG.org">\\n';
+    xml += \`  <channel id="\${channelId}">\\n\`;
+    xml += \`    <display-name>\${env.CHANNEL_SLUG}</display-name>\\n\`;
+    xml += \`  </channel>\\n\`;
+
+    let t = windowStart;
+    while (t < windowEnd) {
+      const elapsed = t - epoch;
+      const loopDuration = totalSegments * segDur;
+      const loopPos = ((elapsed % loopDuration) + loopDuration) % loopDuration;
+      const flatIndex = Math.floor(loopPos / segDur);
+      const { program } = allSegments[flatIndex];
       const programDuration = program.segments * segDur;
+
       const startStr = new Date(t * 1000).toISOString().replace(/[-:]/g, "").replace("T", "").split(".")[0] + " +0000";
       const endStr = new Date((t + programDuration) * 1000).toISOString().replace(/[-:]/g, "").replace("T", "").split(".")[0] + " +0000";
+
       xml += \`  <programme start="\${startStr}" stop="\${endStr}" channel="\${channelId}">\\n\`;
-      xml += \`    <title>\${(program.songTitle || program.id).replace(/&/g, "&amp;")}\\n\`;
+      xml += \`    <title>\${(program.songTitle || program.id).replace(/&/g, "&amp;")}</title>\\n\`;
       xml += \`    <desc>\${(program.artistName || "Unknown Artist").replace(/&/g, "&amp;")}</desc>\\n\`;
       xml += \`    <category>Music</category>\\n\`;
+      if (program.thumbnailUrl) {
+        xml += \`    <icon src="\${program.thumbnailUrl}" />\\n\`;
+      }
       xml += \`  </programme>\\n\`;
+
       t += programDuration;
     }
 

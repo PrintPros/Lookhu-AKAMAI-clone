@@ -98,6 +98,139 @@ async function startServer() {
     });
   });
 
+  // Helper to verify master admin
+  const isMasterAdmin = async (uid: string) => {
+    if (!dbAdmin) return false;
+    const userDoc = await dbAdmin.collection("users").doc(uid).get();
+    if (!userDoc.exists) return false;
+    const userData = userDoc.data();
+    return userData.role === "master_admin" || userData.email === "lookhumaster@gmail.com" || userData.email === "rpduece@gmail.com";
+  };
+
+  // Helper to verify account admin
+  const isAccountAdmin = async (uid: string, accountId: string) => {
+    if (!dbAdmin) return false;
+    if (await isMasterAdmin(uid)) return true;
+    const userDoc = await dbAdmin.collection("users").doc(uid).get();
+    if (!userDoc.exists) return false;
+    const userData = userDoc.data();
+    return userData.role === "admin" && userData.accountId === accountId;
+  };
+
+  // Master Admin: List all accounts
+  app.get("/api/admin/accounts", async (req, res) => {
+    const authHeader = req.headers.authorization;
+    if (!authHeader?.startsWith("Bearer ")) return res.status(401).json({ error: "Unauthorized" });
+    const idToken = authHeader.split("Bearer ")[1];
+    try {
+      const decodedToken = await authAdmin.verifyIdToken(idToken);
+      if (!(await isMasterAdmin(decodedToken.uid))) return res.status(403).json({ error: "Forbidden" });
+      const snapshot = await dbAdmin.collection("accounts").get();
+      const accounts = snapshot.docs.map((doc: any) => ({ id: doc.id, ...doc.data() }));
+      res.json(accounts);
+    } catch (err: any) {
+      res.status(500).json({ error: err.message });
+    }
+  });
+
+  // Master Admin: List all users
+  app.get("/api/admin/users", async (req, res) => {
+    const authHeader = req.headers.authorization;
+    if (!authHeader?.startsWith("Bearer ")) return res.status(401).json({ error: "Unauthorized" });
+    const idToken = authHeader.split("Bearer ")[1];
+    try {
+      const decodedToken = await authAdmin.verifyIdToken(idToken);
+      if (!(await isMasterAdmin(decodedToken.uid))) return res.status(403).json({ error: "Forbidden" });
+      const snapshot = await dbAdmin.collection("users").get();
+      const users = snapshot.docs.map((doc: any) => ({ id: doc.id, ...doc.data() }));
+      res.json(users);
+    } catch (err: any) {
+      res.status(500).json({ error: err.message });
+    }
+  });
+
+  // Master Admin: Create Account
+  app.post("/api/admin/accounts", async (req, res) => {
+    const authHeader = req.headers.authorization;
+    if (!authHeader?.startsWith("Bearer ")) return res.status(401).json({ error: "Unauthorized" });
+    const idToken = authHeader.split("Bearer ")[1];
+    const { name, ownerId } = req.body;
+    try {
+      const decodedToken = await authAdmin.verifyIdToken(idToken);
+      if (!(await isMasterAdmin(decodedToken.uid))) return res.status(403).json({ error: "Forbidden" });
+      const accountRef = await dbAdmin.collection("accounts").add({
+        name,
+        ownerId,
+        members: [ownerId],
+        createdAt: new Date().toISOString()
+      });
+      // Update owner's accountId
+      await dbAdmin.collection("users").doc(ownerId).update({ accountId: accountRef.id, role: "admin" });
+      res.json({ id: accountRef.id });
+    } catch (err: any) {
+      res.status(500).json({ error: err.message });
+    }
+  });
+
+  // Send Invitation
+  app.post("/api/invites/send", async (req, res) => {
+    const authHeader = req.headers.authorization;
+    if (!authHeader?.startsWith("Bearer ")) return res.status(401).json({ error: "Unauthorized" });
+    const idToken = authHeader.split("Bearer ")[1];
+    const { email, accountId, role } = req.body;
+    try {
+      const decodedToken = await authAdmin.verifyIdToken(idToken);
+      if (!(await isAccountAdmin(decodedToken.uid, accountId))) return res.status(403).json({ error: "Forbidden" });
+      
+      const inviteRef = await dbAdmin.collection("invitations").add({
+        email,
+        accountId,
+        role: role || "user",
+        status: "pending",
+        invitedBy: decodedToken.uid,
+        createdAt: new Date().toISOString()
+      });
+      res.json({ id: inviteRef.id });
+    } catch (err: any) {
+      res.status(500).json({ error: err.message });
+    }
+  });
+
+  // Accept Invitation
+  app.post("/api/invites/accept", async (req, res) => {
+    const authHeader = req.headers.authorization;
+    if (!authHeader?.startsWith("Bearer ")) return res.status(401).json({ error: "Unauthorized" });
+    const idToken = authHeader.split("Bearer ")[1];
+    const { inviteId } = req.body;
+    try {
+      const decodedToken = await authAdmin.verifyIdToken(idToken);
+      const inviteDoc = await dbAdmin.collection("invitations").doc(inviteId).get();
+      if (!inviteDoc.exists) return res.status(404).json({ error: "Invitation not found" });
+      const inviteData = inviteDoc.data();
+      
+      if (inviteData.email !== decodedToken.email) return res.status(403).json({ error: "Email mismatch" });
+      if (inviteData.status !== "pending") return res.status(400).json({ error: "Invitation already processed" });
+
+      // Update user profile
+      await dbAdmin.collection("users").doc(decodedToken.uid).update({
+        accountId: inviteData.accountId,
+        role: inviteData.role
+      });
+
+      // Add to account members
+      await dbAdmin.collection("accounts").doc(inviteData.accountId).update({
+        members: FieldValue.arrayUnion(decodedToken.uid)
+      });
+
+      // Mark invite as accepted
+      await inviteDoc.ref.update({ status: "accepted" });
+
+      res.json({ success: true });
+    } catch (err: any) {
+      res.status(500).json({ error: err.message });
+    }
+  });
+
   app.post("/api/r2/test", async (req, res) => {
     const { accountId, r2AccessKeyId, r2SecretAccessKey, bucketName } = req.body;
     if (!accountId || !r2AccessKeyId || !r2SecretAccessKey || !bucketName) {
@@ -405,8 +538,8 @@ async function startServer() {
 
       // 3. Get duration by parsing the generated m3u8
       const m3u8Content = fs.readFileSync(m3u8Path, "utf-8");
-      const extinfMatches = m3u8Content.match(/#EXTINF:([\d.]+)/g) || [];
-      const duration: number = extinfMatches.reduce((sum, line) => {
+      const extinfMatches: string[] = m3u8Content.match(/#EXTINF:([\d.]+)/g) || [];
+      const duration: number = extinfMatches.reduce((sum: number, line: string) => {
         return sum + parseFloat(line.replace("#EXTINF:", ""));
       }, 0);
 
@@ -697,26 +830,21 @@ async function startServer() {
     }
   });
 
-  app.post("/api/submission", (req, res) => {
+  app.post("/api/submission", async (req, res) => {
     const submission = req.body;
     
     try {
-      const submissionsPath = path.join(process.cwd(), "submissions.json");
-      let submissions = [];
-      
-      if (fs.existsSync(submissionsPath)) {
-        submissions = JSON.parse(fs.readFileSync(submissionsPath, "utf-8"));
+      if (!dbAdmin) {
+        throw new Error("Firestore Admin SDK not initialized");
       }
-      
-      submissions.push({
+
+      const docRef = await dbAdmin.collection("submissions").add({
         ...submission,
-        id: uuidv4(),
         submittedAt: new Date().toISOString(),
         status: "pending"
       });
       
-      fs.writeFileSync(submissionsPath, JSON.stringify(submissions, null, 2));
-      res.json({ success: true });
+      res.json({ success: true, id: docRef.id });
     } catch (error) {
       console.error("Submission Error:", error);
       res.status(500).json({ error: "Failed to save submission" });
@@ -816,7 +944,7 @@ async function startServer() {
           "Cross-Origin-Opener-Policy": "same-origin-allow-popups",
         },
       },
-      appType: "custom",
+      appType: "spa",
     });
     app.use(vite.middlewares);
   } else {

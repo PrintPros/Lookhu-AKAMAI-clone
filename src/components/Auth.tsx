@@ -44,7 +44,7 @@ export function Auth({ onSuccess }: AuthProps) {
           displayName: user.displayName,
           photoURL: user.photoURL,
           createdAt: new Date().toISOString(),
-          role: user.email === "lookhumaster@gmail.com" ? "admin" : "user"
+          role: (user.email === "lookhumaster@gmail.com" || user.email === "rpduece@gmail.com") ? "master_admin" : "user"
         });
       }
       onSuccess();
@@ -72,7 +72,7 @@ export function Auth({ onSuccess }: AuthProps) {
           email: result.user.email,
           displayName: displayName,
           createdAt: new Date().toISOString(),
-          role: email === "lookhumaster@gmail.com" ? "admin" : "user"
+          role: (email === "lookhumaster@gmail.com" || email === "rpduece@gmail.com") ? "master_admin" : "user"
         });
       } else {
         await signInWithEmailAndPassword(auth, email, password);

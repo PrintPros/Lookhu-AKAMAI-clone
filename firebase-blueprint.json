@@ -48,9 +48,37 @@
         "uid": { "type": "string" },
         "email": { "type": "string", "format": "email" },
         "displayName": { "type": "string" },
-        "photoURL": { "type": "string", "format": "uri" }
+        "photoURL": { "type": "string", "format": "uri" },
+        "role": { "type": "string", "enum": ["master_admin", "admin", "user"] },
+        "accountId": { "type": "string" }
       },
       "required": ["uid", "email"]
+    },
+    "Account": {
+      "title": "Account",
+      "description": "A grouping of users and resources",
+      "type": "object",
+      "properties": {
+        "name": { "type": "string" },
+        "ownerId": { "type": "string" },
+        "createdAt": { "type": "string", "format": "date-time" },
+        "members": { "type": "array", "items": { "type": "string" } }
+      },
+      "required": ["name", "ownerId"]
+    },
+    "Invitation": {
+      "title": "Invitation",
+      "description": "An invite to join an account",
+      "type": "object",
+      "properties": {
+        "email": { "type": "string", "format": "email" },
+        "accountId": { "type": "string" },
+        "role": { "type": "string", "enum": ["admin", "user"] },
+        "status": { "type": "string", "enum": ["pending", "accepted", "expired"] },
+        "invitedBy": { "type": "string" },
+        "createdAt": { "type": "string", "format": "date-time" }
+      },
+      "required": ["email", "accountId", "status", "invitedBy"]
     },
     "AdConfig": {
       "title": "AdConfig",
@@ -107,6 +135,8 @@
   },
   "firestore": {
     "media": { "schema": "Media", "description": "Media library" },
+    "accounts": { "schema": "Account", "description": "User accounts" },
+    "invitations": { "schema": "Invitation", "description": "Invitations to join accounts" },
     "channels": { "schema": "Channel", "description": "Configured channels" },
     "playlists": { "schema": "Playlist", "description": "Playlists for channels" },
     "users": { "schema": "UserProfile", "description": "User profiles" },
