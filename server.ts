@@ -403,12 +403,12 @@ async function startServer() {
           .run();
       });
 
-      // 3. Get duration
-      const duration: number = await new Promise((resolve) => {
-        ffmpeg.ffprobe(rawPath, (err: any, data: any) => {
-          resolve(data?.format?.duration || 0);
-        });
-      });
+      // 3. Get duration by parsing the generated m3u8
+      const m3u8Content = fs.readFileSync(m3u8Path, "utf-8");
+      const extinfMatches = m3u8Content.match(/#EXTINF:([\d.]+)/g) || [];
+      const duration: number = extinfMatches.reduce((sum, line) => {
+        return sum + parseFloat(line.replace("#EXTINF:", ""));
+      }, 0);
 
       // 4. Upload segments to R2
       const files = fs.readdirSync(segDir);
