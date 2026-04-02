@@ -606,16 +606,20 @@ export function ChannelManager({ setActiveTab }: ChannelManagerProps) {
                     <Input
                       type="number"
                       value={editingChannel.segmentDuration || 6}
-                      onChange={(e) => setEditingChannel({ ...editingChannel, segmentDuration: parseInt(e.target.value) })}
+                      readOnly
+                      className="bg-zinc-50 cursor-not-allowed"
                     />
+                    <p className="text-[10px] text-zinc-400 italic">Locked for optimal performance</p>
                   </div>
                   <div className="space-y-2">
                     <label className="text-xs font-bold text-zinc-500 uppercase">Window (segments)</label>
                     <Input
                       type="number"
                       value={editingChannel.window || 90}
-                      onChange={(e) => setEditingChannel({ ...editingChannel, window: parseInt(e.target.value) })}
+                      readOnly
+                      className="bg-zinc-50 cursor-not-allowed"
                     />
+                    <p className="text-[10px] text-zinc-400 italic">Locked for optimal performance</p>
                   </div>
                 </div>
               </div>

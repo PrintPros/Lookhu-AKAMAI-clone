@@ -43,10 +43,20 @@ export function EPGViewer({ channelId, epgData: externalEpg }: EPGViewerProps) {
   const [channel, setChannel] = useState<Channel | null>(null);
   const [playlist, setPlaylist] = useState<Playlist | null>(null);
   const [mediaItems, setMediaItems] = useState<Media[]>([]);
-  const [loading, setLoading] = useState(true);
+  const [channelsLoading, setChannelsLoading] = useState(true);
+  const [detailsLoading, setDetailsLoading] = useState(false);
   const [importedEpg, setImportedEpg] = useState<EPGEntry[] | null>(null);
   const [showImport, setShowImport] = useState(false);
   const [currentTime, setCurrentTime] = useState(Date.now() / 1000);
+  const [playlists, setPlaylists] = useState<Playlist[]>([]);
+  const [allMedia, setAllMedia] = useState<Media[]>([]);
+
+  // Sync selectedChannelId with prop
+  useEffect(() => {
+    if (channelId) {
+      setSelectedChannelId(channelId);
+    }
+  }, [channelId]);
 
   // Update clock every second
   useEffect(() => {
@@ -54,30 +64,41 @@ export function EPGViewer({ channelId, epgData: externalEpg }: EPGViewerProps) {
     return () => clearInterval(timer);
   }, []);
 
-  // Fetch all channels for selector
+  // Fetch all channels, playlists, and media for high-level view
   useEffect(() => {
-    const q = query(collection(db, "channels"));
-    const unsubscribe = onSnapshot(q, (snapshot) => {
-      const data = snapshot.docs.map(d => ({ id: d.id, ...d.data() } as Channel));
-      setChannels(data);
+    const unsubChannels = onSnapshot(collection(db, "channels"), (snap) => {
+      setChannels(snap.docs.map(d => ({ id: d.id, ...d.data() } as Channel)));
+      setChannelsLoading(false);
     }, (error) => {
-      handleFirestoreError(error, OperationType.GET, "channels");
+      console.error("Channels fetch error:", error);
+      setChannelsLoading(false);
     });
-    return () => unsubscribe();
+
+    const unsubPlaylists = onSnapshot(collection(db, "playlists"), (snap) => {
+      setPlaylists(snap.docs.map(d => ({ id: d.id, ...d.data() } as Playlist)));
+    });
+
+    const unsubMedia = onSnapshot(collection(db, "media"), (snap) => {
+      setAllMedia(snap.docs.map(d => ({ id: d.id, ...d.data() } as Media)));
+    });
+
+    return () => {
+      unsubChannels();
+      unsubPlaylists();
+      unsubMedia();
+    };
   }, []);
 
   useEffect(() => {
     if (!selectedChannelId) {
-      setLoading(false);
       setChannel(null);
       setPlaylist(null);
       setMediaItems([]);
+      setDetailsLoading(false);
       return;
     }
 
-    setLoading(true);
-
-    // Firestore fetch
+    setDetailsLoading(true);
     const fetchChannelData = async () => {
       try {
         const channelDoc = await getDoc(doc(db, "channels", selectedChannelId));
@@ -92,7 +113,6 @@ export function EPGViewer({ channelId, epgData: externalEpg }: EPGViewerProps) {
               setPlaylist(pData);
               
               if (pData.mediaIds && pData.mediaIds.length > 0) {
-                // Fetch media items in chunks of 10 (Firestore limit for 'in' query)
                 const mediaPromises = [];
                 for (let i = 0; i < pData.mediaIds.length; i += 10) {
                   const chunk = pData.mediaIds.slice(i, i + 10);
@@ -100,30 +120,36 @@ export function EPGViewer({ channelId, epgData: externalEpg }: EPGViewerProps) {
                   mediaPromises.push(getDocs(q));
                 }
                 const snapshots = await Promise.all(mediaPromises);
-                const allMedia = snapshots.flatMap(snap => snap.docs.map(d => ({ id: d.id, ...d.data() } as Media)));
-                // Sort to match playlist order
-                const sortedMedia = (pData.mediaIds || []).map(id => allMedia.find(item => item.id === id)).filter(Boolean) as Media[];
+                const fetchedMedia = snapshots.flatMap(snap => snap.docs.map(d => ({ id: d.id, ...d.data() } as Media)));
+                const sortedMedia = (pData.mediaIds || []).map(id => fetchedMedia.find(item => item.id === id)).filter(Boolean) as Media[];
                 setMediaItems(sortedMedia);
+              } else {
+                setMediaItems([]);
               }
+            } else {
+              setPlaylist(null);
+              setMediaItems([]);
             }
+          } else {
+            setPlaylist(null);
+            setMediaItems([]);
           }
         }
-        setLoading(false);
       } catch (error) {
-        handleFirestoreError(error, OperationType.GET, `channels/${selectedChannelId}`);
-        setLoading(false);
+        console.error("EPG details fetch error:", error);
+      } finally {
+        setDetailsLoading(false);
       }
     };
 
     fetchChannelData();
   }, [selectedChannelId]);
 
-  const derivedEpg = useMemo(() => {
-    if (externalEpg) return externalEpg;
-    if (importedEpg) return importedEpg;
-    if (!playlist || mediaItems.length === 0) return [];
+  const loading = selectedChannelId ? detailsLoading : channelsLoading;
 
-    const totalDuration = mediaItems.reduce((acc, curr) => acc + (curr.duration || 0), 0);
+  const getDerivedEpg = (p: Playlist | null, mItems: Media[]) => {
+    if (!p || mItems.length === 0) return [];
+    const totalDuration = mItems.reduce((acc, curr) => acc + (curr.duration || 0), 0);
     if (totalDuration === 0) return [];
 
     const timeSinceEpoch = currentTime - EPOCH;
@@ -132,10 +158,8 @@ export function EPGViewer({ channelId, epgData: externalEpg }: EPGViewerProps) {
     const entries: EPGEntry[] = [];
     let runningTime = EPOCH + loopStartOffset;
 
-    // Generate enough entries to cover current time + next few hours
-    // We'll generate 2 full loops to be safe
     for (let i = 0; i < 2; i++) {
-      for (const media of mediaItems) {
+      for (const media of mItems) {
         const duration = media.duration || 0;
         entries.push({
           mediaId: media.id,
@@ -148,20 +172,27 @@ export function EPGViewer({ channelId, epgData: externalEpg }: EPGViewerProps) {
           twitterUrl: media.twitterUrl,
           youtubeUrl: media.youtubeUrl,
           thumbnailUrl: media.thumbnailUrl,
-          isAdBreak: media.adBreakAfter // This is a simplification
+          isAdBreak: media.adBreakAfter
         });
         runningTime += duration;
       }
     }
-
     return entries;
+  };
+
+  const derivedEpg = useMemo(() => {
+    if (externalEpg) return externalEpg;
+    if (importedEpg) return importedEpg;
+    return getDerivedEpg(playlist, mediaItems);
   }, [playlist, mediaItems, currentTime, externalEpg, importedEpg]);
 
-  const { nowPlaying, comingUp } = useMemo(() => {
-    const now = derivedEpg.find(e => currentTime >= e.startTime && currentTime < e.endTime);
-    const future = derivedEpg.filter(e => e.startTime > currentTime).slice(0, 3);
+  const getNowAndNext = (epg: EPGEntry[]) => {
+    const now = epg.find(e => currentTime >= e.startTime && currentTime < e.endTime);
+    const future = epg.filter(e => e.startTime > currentTime).slice(0, 3);
     return { nowPlaying: now, comingUp: future };
-  }, [derivedEpg, currentTime]);
+  };
+
+  const { nowPlaying, comingUp } = useMemo(() => getNowAndNext(derivedEpg), [derivedEpg, currentTime]);
 
   const displayName = (e: EPGEntry) => e.artistName && e.songTitle 
     ? `${e.artistName} — ${e.songTitle}` 
@@ -170,7 +201,6 @@ export function EPGViewer({ channelId, epgData: externalEpg }: EPGViewerProps) {
   const handleFileUpload = (e: React.ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0];
     if (!file) return;
-
     const reader = new FileReader();
     reader.onload = (event) => {
       try {
@@ -191,26 +221,117 @@ export function EPGViewer({ channelId, epgData: externalEpg }: EPGViewerProps) {
 
   if (loading) {
     return (
-      <div className="flex justify-center py-12">
-        <Loader2 className="h-8 w-8 animate-spin text-zinc-400" />
+      <div className="flex flex-col items-center justify-center py-24 space-y-4">
+        <Loader2 className="h-10 w-10 animate-spin text-zinc-900" />
+        <p className="text-zinc-500 font-medium animate-pulse">Loading Program Guide...</p>
       </div>
     );
   }
 
-  if (!channel || !playlist) {
+  // High-level view for all active channels
+  if (!selectedChannelId) {
     return (
-      <div className="py-12 text-center bg-zinc-50 rounded-2xl border border-zinc-200 border-dashed">
-        <Radio className="h-12 w-12 mx-auto text-zinc-200 mb-4" />
-        <p className="text-zinc-500">Select a channel to view the program guide.</p>
+      <div className="space-y-8">
+        <div className="flex items-center justify-between">
+          <div>
+            <h2 className="text-2xl font-bold tracking-tight text-zinc-900">Electronic Program Guide</h2>
+            <p className="text-zinc-500">Live schedules for all active channels.</p>
+          </div>
+        </div>
+
+        <div className="grid gap-6">
+          {channels.filter(c => c.status === "online").map(c => {
+            const p = playlists.find(pl => pl.id === c.playlistId);
+            const mItems = (p?.mediaIds || []).map(id => allMedia.find(m => m.id === id)).filter(Boolean) as Media[];
+            const epg = getDerivedEpg(p || null, mItems);
+            const { nowPlaying: now, comingUp: next } = getNowAndNext(epg);
+
+            return (
+              <Card key={c.id} className="overflow-hidden border-zinc-200 hover:border-zinc-400 transition-all group">
+                <div className="flex flex-col md:flex-row h-full">
+                  <div className="w-full md:w-64 aspect-video bg-zinc-900 relative shrink-0">
+                    {now?.thumbnailUrl ? (
+                      <img src={now.thumbnailUrl} alt="" className="w-full h-full object-cover opacity-60" referrerPolicy="no-referrer" />
+                    ) : (
+                      <div className="w-full h-full flex items-center justify-center text-zinc-700">
+                        <Radio className="h-12 w-12" />
+                      </div>
+                    )}
+                    <div className="absolute inset-0 bg-gradient-to-t from-black/80 to-transparent flex flex-col justify-end p-4">
+                      <Badge className="w-fit mb-2 bg-red-600 border-none">LIVE</Badge>
+                      <h3 className="text-white font-bold truncate">{c.name}</h3>
+                    </div>
+                  </div>
+                  
+                  <div className="flex-1 p-6 flex flex-col justify-between">
+                    <div className="space-y-4">
+                      <div>
+                        <span className="text-[10px] font-bold text-zinc-400 uppercase tracking-wider">Now Playing</span>
+                        <h4 className="text-lg font-bold text-zinc-900 truncate">
+                          {now ? displayName(now) : "No Program Data"}
+                        </h4>
+                        {now && (
+                          <div className="flex items-center gap-2 mt-1">
+                            <div className="flex-1 h-1 bg-zinc-100 rounded-full overflow-hidden">
+                              <div 
+                                className="h-full bg-zinc-900" 
+                                style={{ width: `${((currentTime - now.startTime) / (now.endTime - now.startTime)) * 100}%` }}
+                              />
+                            </div>
+                            <span className="text-[10px] font-mono text-zinc-500">
+                              -{formatTimeRemaining(now.endTime - currentTime)}
+                            </span>
+                          </div>
+                        )}
+                      </div>
+
+                      <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+                        {next.slice(0, 2).map((entry, i) => (
+                          <div key={i} className="flex items-center gap-3 p-2 bg-zinc-50 rounded-lg border border-zinc-100">
+                            <div className="w-10 h-10 rounded bg-zinc-200 shrink-0 overflow-hidden">
+                              {entry.thumbnailUrl && <img src={entry.thumbnailUrl} className="w-full h-full object-cover" referrerPolicy="no-referrer" />}
+                            </div>
+                            <div className="min-w-0">
+                              <p className="text-[10px] font-bold text-zinc-400 uppercase">Next</p>
+                              <p className="text-xs font-medium text-zinc-900 truncate">{displayName(entry)}</p>
+                            </div>
+                          </div>
+                        ))}
+                      </div>
+                    </div>
+
+                    <div className="flex justify-end mt-4">
+                      <Button variant="outline" size="sm" onClick={() => setSelectedChannelId(c.id)}>
+                        View Full Schedule
+                      </Button>
+                    </div>
+                  </div>
+                </div>
+              </Card>
+            );
+          })}
+
+          {channels.filter(c => c.status === "online").length === 0 && (
+            <div className="py-24 text-center bg-zinc-50 rounded-2xl border border-zinc-200 border-dashed">
+              <Radio className="h-12 w-12 mx-auto text-zinc-200 mb-4" />
+              <p className="text-zinc-500">No active channels currently broadcasting.</p>
+            </div>
+          )}
+        </div>
       </div>
     );
   }
 
   return (
     <div className="space-y-8">
-      {/* Channel Selector */}
-      {!channelId && (
-        <div className="flex items-center gap-4 bg-white p-4 rounded-xl border border-zinc-200">
+      {/* Channel Selector / Back Button */}
+      <div className="flex items-center gap-4">
+        {!channelId && (
+          <Button variant="ghost" size="sm" onClick={() => setSelectedChannelId(null)}>
+            ← Back to All Channels
+          </Button>
+        )}
+        <div className="flex-1 flex items-center gap-4 bg-white p-4 rounded-xl border border-zinc-200">
           <Radio className="h-5 w-5 text-zinc-400" />
           <select 
             className="flex-1 bg-transparent border-none focus:ring-0 font-medium text-zinc-900"
@@ -223,7 +344,7 @@ export function EPGViewer({ channelId, epgData: externalEpg }: EPGViewerProps) {
             ))}
           </select>
         </div>
-      )}
+      </div>
 
       {/* Now Playing Section */}
       <section>
