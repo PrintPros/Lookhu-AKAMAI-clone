@@ -25,31 +25,43 @@ export function VideoPlayer({
     const video = videoRef.current;
     if (!video) return;
 
-    if (Hls.isSupported()) {
-      const hls = new Hls();
-      hls.loadSource(src);
-      hls.attachMedia(video);
-      hls.on(Hls.Events.MANIFEST_PARSED, () => {
-        if (autoPlay) {
-          video.play().catch(() => {
-            console.log("Autoplay blocked, waiting for user interaction");
-          });
-        }
-      });
+    const isHls = src.endsWith(".m3u8");
 
-      return () => {
-        hls.destroy();
-      };
-    } else if (video.canPlayType("application/vnd.apple.mpegurl")) {
-      // For Safari
+    if (isHls) {
+      if (Hls.isSupported()) {
+        const hls = new Hls();
+        hls.loadSource(src);
+        hls.attachMedia(video);
+        hls.on(Hls.Events.MANIFEST_PARSED, () => {
+          if (autoPlay) {
+            video.play().catch(() => {
+              console.log("Autoplay blocked, waiting for user interaction");
+            });
+          }
+        });
+
+        return () => {
+          hls.destroy();
+        };
+      } else if (video.canPlayType("application/vnd.apple.mpegurl")) {
+        // For Safari
+        video.src = src;
+        video.addEventListener("loadedmetadata", () => {
+          if (autoPlay) {
+            video.play().catch(() => {
+              console.log("Autoplay blocked, waiting for user interaction");
+            });
+          }
+        });
+      }
+    } else {
+      // Native MP4 or other supported formats
       video.src = src;
-      video.addEventListener("loadedmetadata", () => {
-        if (autoPlay) {
-          video.play().catch(() => {
-            console.log("Autoplay blocked, waiting for user interaction");
-          });
-        }
-      });
+      if (autoPlay) {
+        video.play().catch(() => {
+          console.log("Autoplay blocked, waiting for user interaction");
+        });
+      }
     }
   }, [src]);
 
@@ -62,6 +74,7 @@ export function VideoPlayer({
       autoPlay={autoPlay}
       muted={muted}
       loop={loop}
+      referrerPolicy="no-referrer"
     />
   );
 }

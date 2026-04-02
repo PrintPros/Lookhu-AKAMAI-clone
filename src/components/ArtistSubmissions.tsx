@@ -7,6 +7,7 @@ import {
   addDoc, 
   updateDoc, 
   doc,
+  getDoc,
   where,
   getDocs,
   limit
@@ -71,36 +72,95 @@ export function ArtistSubmissions() {
   }, []);
 
   const handleApprove = async (submission: ArtistSubmission) => {
-    const mediaData: Omit<Media, "id"> = {
-      name: `${submission.artistName} - ${submission.songTitle}`,
-      m3u8Url: submission.m3u8Url || submission.videoFileUrl, // Fallback to raw if not transcoded
-      status: "ready",
-      duration: submission.duration,
-      createdAt: new Date().toISOString(),
-      userId: auth.currentUser?.uid || "admin",
-      artistName: submission.artistName,
-      songTitle: submission.songTitle,
-      genre: submission.genre,
-      instagramUrl: submission.instagramUrl,
-      twitterUrl: submission.twitterUrl,
-      youtubeUrl: submission.youtubeUrl,
-      websiteUrl: submission.websiteUrl,
-      thumbnailUrl: submission.thumbnailUrl,
-      submissionStatus: "approved",
-      submittedBy: submission.email
-    };
-
     try {
-      // 1. Add to media
+      // 1. Get the Cloudflare config used for this submission
+      let configData: any = null;
+      if (submission.configId) {
+        const configSnap = await getDoc(doc(db, "cloudflareConfigs", submission.configId));
+        if (configSnap.exists()) {
+          configData = configSnap.data();
+        }
+      }
+
+      const mediaData: Omit<Media, "id"> = {
+        name: `${submission.artistName} - ${submission.songTitle}`,
+        m3u8Url: submission.m3u8Url || "", // Will be populated by transcoder
+        status: submission.mp4Key ? "transcoding" : "ready",
+        duration: submission.duration || 0,
+        createdAt: new Date().toISOString(),
+        userId: auth.currentUser?.uid || "admin",
+        artistName: submission.artistName,
+        songTitle: submission.songTitle,
+        genre: submission.genre,
+        instagramUrl: submission.instagramUrl,
+        twitterUrl: submission.twitterUrl,
+        youtubeUrl: submission.youtubeUrl,
+        websiteUrl: submission.websiteUrl,
+        thumbnailUrl: submission.thumbnailUrl,
+        submissionStatus: "approved",
+        submittedBy: submission.email,
+        bucketName: configData?.bucketName,
+      };
+
+      // 2. Add to media
       const mediaRef = await addDoc(collection(db, "media"), mediaData);
       
-      // 2. Update submission
+      // 3. Trigger transcoding if we have an MP4 key
+      if (submission.mp4Key && configData) {
+        const idToken = await auth.currentUser?.getIdToken();
+        fetch("/api/transcode", {
+          method: "POST",
+          headers: {
+            "Content-Type": "application/json",
+            "Authorization": `Bearer ${idToken}`
+          },
+          body: JSON.stringify({
+            mp4Key: submission.mp4Key,
+            mediaId: mediaRef.id,
+            accountId: configData.accountId,
+            r2AccessKeyId: configData.r2AccessKeyId,
+            r2SecretAccessKey: configData.r2SecretAccessKey,
+            bucketName: configData.bucketName,
+            publicBaseUrl: configData.publicBaseUrl,
+            userId: auth.currentUser?.uid,
+            metadata: {
+              artistName: submission.artistName,
+              songTitle: submission.songTitle
+            }
+          })
+        })
+        .then(async (res) => {
+          if (!res.ok) throw new Error("Transcoding failed");
+          const data = await res.json();
+          const videoId = submission.mp4Key?.split('/')[1] || mediaRef.id;
+          await updateDoc(doc(db, "media", mediaRef.id), {
+            status: "ready",
+            m3u8Url: `${configData.publicBaseUrl}/streams/${videoId}/index.m3u8`,
+            segmentCount: data.segmentCount,
+            duration: data.duration,
+            segmentDuration: 6,
+            segmentPrefix: "segment_",
+            segmentPad: 4,
+            r2Path: `streams/${videoId}`,
+            bucketName: configData.bucketName,
+          });
+        })
+        .catch(async (err) => {
+          console.error("Transcode trigger failed:", err);
+          await updateDoc(doc(db, "media", mediaRef.id), {
+            status: "error",
+            errorMessage: err.message
+          });
+        });
+      }
+
+      // 4. Update submission
       await updateDoc(doc(db, "submissions", submission.id), {
         status: "approved",
         reviewedAt: new Date().toISOString()
       });
 
-      // 3. Add to genre playlist
+      // 5. Add to genre playlist
       const q = query(
         collection(db, "playlists"), 
         where("genre", "==", submission.genre),
@@ -244,8 +304,8 @@ export function ArtistSubmissions() {
                       title={`${submission.artistName} - ${submission.songTitle}`}
                     >
                       <div className="aspect-video bg-black rounded-lg overflow-hidden">
-                        {submission.m3u8Url || submission.videoFileUrl ? (
-                          <VideoPlayer src={submission.m3u8Url || submission.videoFileUrl} />
+                        {submission.videoFileUrl || submission.m3u8Url ? (
+                          <VideoPlayer src={submission.videoFileUrl || submission.m3u8Url || ""} />
                         ) : (
                           <div className="w-full h-full flex flex-col items-center justify-center text-zinc-500 gap-4">
                             <Loader2 className="h-12 w-12 animate-spin" />

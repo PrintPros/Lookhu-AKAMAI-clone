@@ -86,6 +86,8 @@ export interface ArtistSubmission {
   youtubeUrl?: string;
   websiteUrl?: string;
   videoFileUrl: string;       // temporary upload URL or R2 path
+  mp4Key?: string;            // R2 key for the uploaded MP4
+  configId?: string;          // Cloudflare config used for upload
   m3u8Url?: string;           // populated after transcoding
   thumbnailUrl?: string;
   status: "pending" | "approved" | "rejected";

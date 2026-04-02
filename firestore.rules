@@ -70,13 +70,19 @@ service cloud.firestore {
       return get(/databases/$(database)/documents/users/$(request.auth.uid)).data;
     }
     function isMasterAdmin() {
-      return isAuthenticated() && 
-        (getUserData().role == 'master_admin' ||
-         (request.auth.token.email == "lookhumaster@gmail.com" && request.auth.token.email_verified == true) ||
-         (request.auth.token.email == "rpduece@gmail.com" && request.auth.token.email_verified == true));
+      return isAuthenticated() && (
+        (request.auth.token.email == "lookhumaster@gmail.com" && request.auth.token.email_verified == true) ||
+        (request.auth.token.email == "rpduece@gmail.com" && request.auth.token.email_verified == true) ||
+        (exists(/databases/$(database)/documents/users/$(request.auth.uid)) && 
+         get(/databases/$(database)/documents/users/$(request.auth.uid)).data.role == 'master_admin')
+      );
     }
     function isAdmin() {
-      return isAuthenticated() && (isMasterAdmin() || getUserData().role == 'admin');
+      return isAuthenticated() && (
+        isMasterAdmin() || 
+        (exists(/databases/$(database)/documents/users/$(request.auth.uid)) && 
+         get(/databases/$(database)/documents/users/$(request.auth.uid)).data.role == 'admin')
+      );
     }
     function isAccountMember(accountId) {
       return isAuthenticated() && (isMasterAdmin() || getUserData().accountId == accountId);
@@ -124,11 +130,11 @@ service cloud.firestore {
 
     function isValidMedia(data) {
       return data.name is string && data.name.size() >= 1 && data.name.size() <= 255 &&
-             isValidUrl(data.m3u8Url) &&
+             (data.m3u8Url == "" || isValidUrl(data.m3u8Url)) &&
              data.status in ["uploading", "transcoding", "ready", "error"] &&
              (!('duration' in data) || (data.duration is number && data.duration >= 0)) &&
              isValidDateString(data.createdAt) &&
-             data.userId == request.auth.uid;
+             data.userId is string;
     }
 
     function isValidChannel(data) {
@@ -137,12 +143,12 @@ service cloud.firestore {
              (!('playlistId' in data) || data.playlistId is string) &&
              data.status in ["online", "offline"] &&
              isValidDateString(data.createdAt) &&
-             data.userId == request.auth.uid &&
+             data.userId is string &&
              (!('slug' in data) || data.slug is string) &&
              (!('r2BucketName' in data) || data.r2BucketName is string) &&
              (!('workerDeployed' in data) || data.workerDeployed is bool) &&
              (!('workerNeedsRedeploy' in data) || data.workerNeedsRedeploy is bool) &&
-             (!('workerManifestUrl' in data) || isValidUrl(data.workerManifestUrl)) &&
+             (!('workerManifestUrl' in data) || data.workerManifestUrl == "" || isValidUrl(data.workerManifestUrl)) &&
              (!('lastPublishedAt' in data) || isValidDateString(data.lastPublishedAt));
     }
 
@@ -208,9 +214,11 @@ service cloud.firestore {
 
     match /media/{mediaId} {
       allow read: if true; // Media metadata is public for player access
-      allow create: if isAuthenticated() && isValidMedia(request.resource.data);
-      allow update: if isAuthenticated() && isDocOwner() && isValidMedia(request.resource.data);
-      allow delete: if isAuthenticated() && isDocOwner();
+      allow create: if isAuthenticated() && isValidMedia(request.resource.data) && 
+                    (request.resource.data.userId == request.auth.uid || isMasterAdmin());
+      allow update: if isAuthenticated() && (isDocOwner() || isMasterAdmin()) && isValidMedia(request.resource.data) &&
+                    (request.resource.data.userId == resource.data.userId);
+      allow delete: if isAuthenticated() && (isDocOwner() || isMasterAdmin());
     }
 
     match /accounts/{accountId} {
@@ -229,9 +237,10 @@ service cloud.firestore {
 
     match /channels/{channelId} {
       allow read: if true; // Channels are public for viewers
-      allow create: if isAuthenticated() && isValidChannel(request.resource.data);
-      allow update: if isAuthenticated() && isDocOwner() && isValidChannel(request.resource.data);
-      allow delete: if isAuthenticated() && isDocOwner();
+      allow create: if isAuthenticated() && isValidChannel(request.resource.data) && 
+                    (request.resource.data.userId == request.auth.uid || isMasterAdmin());
+      allow update: if isAuthenticated() && (isDocOwner() || isMasterAdmin()) && isValidChannel(request.resource.data);
+      allow delete: if isAuthenticated() && (isDocOwner() || isMasterAdmin());
     }
 
     match /playlists/{playlistId} {

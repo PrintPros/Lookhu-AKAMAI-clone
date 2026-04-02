@@ -563,23 +563,6 @@ async function startServer() {
       // 5. Count segments
       const segmentCount = files.filter(f => f.endsWith(".ts")).length;
 
-      // 6. Save to Firestore via Admin SDK
-      if (mediaId && dbAdmin) {
-        await dbAdmin.collection("media").doc(mediaId).set({
-          status: "ready",
-          m3u8Url: `${publicBaseUrl}/streams/${videoId}/index.m3u8`,
-          segmentCount,
-          duration,
-          segmentDuration: 6,
-          segmentPrefix: "segment_",
-          segmentPad: 4,
-          r2Path: `streams/${videoId}`,
-          bucketName,
-        }, { merge: true });
-      } else {
-        console.warn("Skipping Firestore update — dbAdmin unavailable or no mediaId");
-      }
-
       // 7. Delete original MP4 now that segments are confirmed
       try {
         await r2.send(new DeleteObjectCommand({
@@ -603,18 +586,6 @@ async function startServer() {
     } catch (err: any) {
       console.error("Transcode error:", err);
       fs.rmSync(tmpDir, { recursive: true, force: true });
-
-      try {
-        const { mediaId } = req.body;
-        if (mediaId && dbAdmin) {
-          await dbAdmin.collection("media").doc(mediaId).set({
-            status: "error",
-            errorMessage: err.message,
-          }, { merge: true });
-        }
-      } catch (e) {
-        console.error("Failed to update error status in Firestore:", e);
-      }
 
       res.status(500).json({ error: err.message });
     }
