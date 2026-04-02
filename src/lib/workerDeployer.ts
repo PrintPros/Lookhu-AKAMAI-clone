@@ -281,7 +281,20 @@ export async function deployChannelWorker(params: {
       return { success: false, error: result.errors?.[0]?.message || "Failed to upload script" };
     }
 
-    // 4. Get account subdomain to construct URL
+    // 4. Enable workers.dev subdomain route
+    await fetch(
+      `https://api.cloudflare.com/client/v4/accounts/${accountId}/workers/scripts/${scriptName}/subdomain`,
+      {
+        method: "POST",
+        headers: {
+          "Authorization": `Bearer ${cfApiToken}`,
+          "Content-Type": "application/json",
+        },
+        body: JSON.stringify({ enabled: true }),
+      }
+    );
+
+    // 5. Get account subdomain to construct URL
     const subdomainResponse = await fetch(
       `https://api.cloudflare.com/client/v4/accounts/${accountId}/workers/subdomain`,
       {
