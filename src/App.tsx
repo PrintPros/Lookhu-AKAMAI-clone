@@ -1,6 +1,6 @@
 import { useState, useEffect } from "react";
 import { db, auth } from "./firebase";
-import { collection, query, where, onSnapshot, doc, getDoc } from "firebase/firestore";
+import { collection, query, where, onSnapshot, doc, getDoc, setDoc } from "firebase/firestore";
 import { onAuthStateChanged, signOut } from "firebase/auth";
 import { Sidebar } from "./components/Sidebar";
 import { Dashboard } from "./components/Dashboard";
@@ -19,6 +19,7 @@ import { ArtistPortal } from "./components/ArtistPortal";
 import { AdminDashboard } from "./components/AdminDashboard";
 import { InviteManager } from "./components/InviteManager";
 import { InvitationList } from "./components/InvitationList";
+import { UserProfile } from "./components/UserProfile";
 import { motion, AnimatePresence } from "framer-motion";
 import { Toaster } from "sonner";
 
@@ -46,9 +47,17 @@ export default function App() {
             data.role = "master_admin";
           }
           setProfile(data);
-        } else if (u.email === "lookhumaster@gmail.com" || u.email === "rpduece@gmail.com") {
-          // Fallback for master admins if doc doesn't exist yet
-          setProfile({ role: "master_admin", email: u.email, uid: u.uid });
+        } else {
+          // If the user document doesn't exist, create a default one
+          const defaultProfile = { 
+            role: (u.email && (u.email === "lookhumaster@gmail.com" || u.email === "rpduece@gmail.com")) ? "master_admin" : "user",
+            email: u.email,
+            uid: u.uid,
+            createdAt: new Date().toISOString()
+          };
+          setProfile(defaultProfile);
+          // Also create it in Firestore
+          await setDoc(doc(db, "users", u.uid), defaultProfile);
         }
       } else {
         setProfile(null);
@@ -139,6 +148,8 @@ export default function App() {
         return <PlatformSettings />;
       case "admin":
         return <AdminDashboard />;
+      case "profile":
+        return <UserProfile user={user} />;
       case "invites":
         return <InviteManager accountId={profile?.accountId} />;
       case "my-invites":

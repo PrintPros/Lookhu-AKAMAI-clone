@@ -1,5 +1,5 @@
 import React, { useState, useEffect } from "react";
-import { Code, Copy, ExternalLink, Share2, MonitorPlay, Check, Info } from "lucide-react";
+import { Code, Copy, ExternalLink, Share2, MonitorPlay, Check, Info, AlertCircle } from "lucide-react";
 import { Card, CardContent, CardHeader, CardTitle, CardDescription, CardFooter } from "./ui/Card";
 import { Button } from "./ui/Button";
 import { Input } from "./ui/Input";
@@ -9,6 +9,7 @@ import { db, auth } from "../firebase";
 import { Badge } from "./ui/Badge";
 
 import { VideoPlayer } from "./VideoPlayer";
+import { EmbedPlayer } from "./EmbedPlayer";
 
 interface EmbedOptionsProps {}
 
@@ -17,6 +18,7 @@ export function EmbedOptions() {
   const [playlists, setPlaylists] = useState<Playlist[]>([]);
   const [media, setMedia] = useState<Media[]>([]);
   const [selectedChannelId, setSelectedChannelId] = useState<string>("");
+  const [selectedSkin, setSelectedSkin] = useState<"default" | "v1">("default");
   const [copied, setCopied] = useState(false);
 
   useEffect(() => {
@@ -70,10 +72,21 @@ export function EmbedOptions() {
   };
 
   const streamUrl = selectedChannel ? getChannelStreamUrl(selectedChannel) : null;
-  const settings = selectedChannel?.embedSettings || { width: "100%", height: "100%", autoPlay: true, muted: true, controls: true };
+  const settings = selectedChannel?.embedSettings || { width: "100%", height: "100%", autoPlay: true, muted: true, controls: true, skin: "default" };
+
+  const getPublicOrigin = () => {
+    const origin = window.location.origin;
+    if (origin.includes("ais-dev-")) {
+      return origin.replace("ais-dev-", "ais-pre-");
+    }
+    return origin;
+  };
+
+  const publicOrigin = getPublicOrigin();
+  const isDevOrigin = window.location.origin.includes("ais-dev-");
 
   const embedCode = `<iframe 
-  src="${window.location.origin}/embed/${selectedChannelId}?autoplay=${settings.autoPlay ?? true}&muted=${settings.muted ?? true}&controls=${settings.controls ?? true}" 
+  src="${publicOrigin}/embed/${selectedChannelId}?autoplay=${settings.autoPlay ?? true}&muted=${settings.muted ?? true}&controls=${settings.controls ?? true}&skin=${selectedSkin}" 
   width="${settings.width || "100%"}" 
   height="${settings.height || "100%"}" 
   frameborder="0" 
@@ -129,6 +142,46 @@ export function EmbedOptions() {
 
           <Card>
             <CardHeader>
+              <CardTitle>Player Skin</CardTitle>
+              <CardDescription>Choose the look and feel of your player.</CardDescription>
+            </CardHeader>
+            <CardContent>
+              <div className="grid grid-cols-2 gap-3">
+                <div 
+                  className={`p-3 rounded-lg border cursor-pointer transition-all flex flex-col items-center gap-2 ${
+                    selectedSkin === "default" 
+                      ? "border-zinc-900 bg-zinc-50 ring-1 ring-zinc-900" 
+                      : "border-zinc-200 hover:border-zinc-300"
+                  }`}
+                  onClick={() => setSelectedSkin("default")}
+                >
+                  <div className="w-full aspect-video bg-zinc-200 rounded border border-zinc-300 flex items-center justify-center">
+                    <MonitorPlay className="h-6 w-6 text-zinc-400" />
+                  </div>
+                  <span className="text-xs font-medium">Default Skin</span>
+                </div>
+                <div 
+                  className={`p-3 rounded-lg border cursor-pointer transition-all flex flex-col items-center gap-2 ${
+                    selectedSkin === "v1" 
+                      ? "border-zinc-900 bg-zinc-50 ring-1 ring-zinc-900" 
+                      : "border-zinc-200 hover:border-zinc-300"
+                  }`}
+                  onClick={() => setSelectedSkin("v1")}
+                >
+                  <div className="w-full aspect-video bg-zinc-900 rounded border border-zinc-800 flex items-center justify-center overflow-hidden relative">
+                    <div className="absolute top-1 left-1 w-2 h-1 bg-red-500 rounded-full" />
+                    <div className="absolute bottom-1 left-1 right-1 h-0.5 bg-zinc-700" />
+                    <div className="absolute right-0 top-0 bottom-0 w-1/4 bg-zinc-800" />
+                    <MonitorPlay className="h-6 w-6 text-zinc-600" />
+                  </div>
+                  <span className="text-xs font-medium">V1 Pro Skin</span>
+                </div>
+              </div>
+            </CardContent>
+          </Card>
+
+          <Card>
+            <CardHeader>
               <CardTitle>Stream Links</CardTitle>
               <CardDescription>Direct URLs for external players.</CardDescription>
             </CardHeader>
@@ -165,6 +218,26 @@ export function EmbedOptions() {
               <CardDescription>Copy this code to your website's HTML.</CardDescription>
             </CardHeader>
             <CardContent>
+              {isDevOrigin && (
+                <div className="mb-4 p-4 bg-red-50 border border-red-200 rounded-lg flex items-start gap-3">
+                  <AlertCircle className="h-6 w-6 text-red-600 shrink-0 mt-0.5" />
+                  <div className="space-y-1">
+                    <p className="text-sm font-bold text-red-900">CRITICAL: Public Access Required</p>
+                    <p className="text-xs text-red-700 leading-relaxed">
+                      You are currently on a <span className="font-bold underline">Development URL</span>. 
+                      Embed codes from this URL <span className="font-bold">WILL NOT WORK</span> on external websites (403 Error).
+                    </p>
+                    <p className="text-xs text-red-700 leading-relaxed mt-2">
+                      To fix this:
+                      <ol className="list-decimal ml-4 mt-1 space-y-1">
+                        <li>Click the <span className="font-bold">Share</span> button in the top right of AI Studio.</li>
+                        <li>Open the <span className="font-bold underline text-blue-700">Shared App URL</span> provided.</li>
+                        <li>Copy the embed code from that page instead.</li>
+                      </ol>
+                    </p>
+                  </div>
+                </div>
+              )}
               <div className="relative">
                 <pre className="p-4 bg-zinc-900 text-zinc-100 rounded-lg text-xs font-mono overflow-x-auto whitespace-pre-wrap">
                   {embedCode}
@@ -194,8 +267,10 @@ export function EmbedOptions() {
             </CardHeader>
             <CardContent>
               <div className="aspect-video bg-black rounded-lg overflow-hidden flex items-center justify-center border border-zinc-200">
-                {streamUrl ? (
-                  <VideoPlayer src={streamUrl} className="w-full h-full" />
+                {selectedChannelId ? (
+                  <div className="w-full h-full scale-[0.25] origin-top-left" style={{ width: '400%', height: '400%' }}>
+                    <EmbedPlayer channelId={selectedChannelId} skin={selectedSkin} />
+                  </div>
                 ) : (
                   <div className="text-zinc-500 text-sm">Select an active channel to see preview.</div>
                 )}

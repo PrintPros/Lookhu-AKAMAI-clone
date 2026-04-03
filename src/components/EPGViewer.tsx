@@ -29,6 +29,7 @@ import {
 } from "lucide-react";
 import { motion, AnimatePresence } from "framer-motion";
 import { handleFirestoreError, OperationType } from "../lib/firestore-errors";
+import { cn } from "../lib/utils";
 
 interface EPGViewerProps {
   channelId?: string;
@@ -50,6 +51,7 @@ export function EPGViewer({ channelId, epgData: externalEpg }: EPGViewerProps) {
   const [currentTime, setCurrentTime] = useState(Date.now() / 1000);
   const [playlists, setPlaylists] = useState<Playlist[]>([]);
   const [allMedia, setAllMedia] = useState<Media[]>([]);
+  const [viewMode, setViewMode] = useState<"cards" | "grid">("grid");
 
   // Sync selectedChannelId with prop
   useEffect(() => {
@@ -152,11 +154,12 @@ export function EPGViewer({ channelId, epgData: externalEpg }: EPGViewerProps) {
     const totalDuration = mItems.reduce((acc, curr) => acc + (curr.duration || 0), 0);
     if (totalDuration === 0) return [];
 
-    const timeSinceEpoch = currentTime - EPOCH;
+    const startEpoch = channel?.epoch || EPOCH;
+    const timeSinceEpoch = currentTime - startEpoch;
     const loopStartOffset = Math.floor(timeSinceEpoch / totalDuration) * totalDuration;
     
     const entries: EPGEntry[] = [];
-    let runningTime = EPOCH + loopStartOffset;
+    let runningTime = startEpoch + loopStartOffset;
 
     for (let i = 0; i < 2; i++) {
       for (const media of mItems) {
@@ -213,6 +216,14 @@ export function EPGViewer({ channelId, epgData: externalEpg }: EPGViewerProps) {
     reader.readAsText(file);
   };
 
+  const formatTime = (timestamp: number) => {
+    return new Date(timestamp * 1000).toLocaleTimeString([], { 
+      hour: 'numeric', 
+      minute: '2-digit',
+      hour12: true 
+    });
+  };
+
   const formatTimeRemaining = (seconds: number) => {
     const m = Math.floor(seconds / 60);
     const s = Math.floor(seconds % 60);
@@ -230,6 +241,16 @@ export function EPGViewer({ channelId, epgData: externalEpg }: EPGViewerProps) {
 
   // High-level view for all active channels
   if (!selectedChannelId) {
+    const activeChannels = channels.filter(c => c.status === "online");
+    
+    // Grid Time Slots (3 hours in 30min increments)
+    const gridStart = Math.floor(currentTime / 1800) * 1800;
+    const gridEnd = gridStart + (4 * 3600); // 4 hours
+    const timeSlots = [];
+    for (let t = gridStart; t < gridEnd; t += 1800) {
+      timeSlots.push(t);
+    }
+
     return (
       <div className="space-y-8">
         <div className="flex items-center justify-between">
@@ -237,10 +258,115 @@ export function EPGViewer({ channelId, epgData: externalEpg }: EPGViewerProps) {
             <h2 className="text-2xl font-bold tracking-tight text-zinc-900">Electronic Program Guide</h2>
             <p className="text-zinc-500">Live schedules for all active channels.</p>
           </div>
+          <div className="flex items-center gap-2 bg-zinc-100 p-1 rounded-lg">
+            <Button 
+              variant={viewMode === "grid" ? "default" : "ghost"} 
+              size="sm" 
+              onClick={() => setViewMode("grid")}
+              className="text-xs h-8"
+            >
+              Grid View
+            </Button>
+            <Button 
+              variant={viewMode === "cards" ? "default" : "ghost"} 
+              size="sm" 
+              onClick={() => setViewMode("cards")}
+              className="text-xs h-8"
+            >
+              Card View
+            </Button>
+          </div>
         </div>
 
-        <div className="grid gap-6">
-          {channels.filter(c => c.status === "online").map(c => {
+        {viewMode === "grid" ? (
+          <Card className="overflow-hidden border-zinc-200">
+            <div className="overflow-x-auto">
+              <div className="min-w-[1200px]">
+                {/* Time Header */}
+                <div className="flex border-b border-zinc-200 bg-zinc-50">
+                  <div className="w-48 shrink-0 p-4 border-r border-zinc-200 font-bold text-xs text-zinc-400 uppercase tracking-wider">
+                    Channels
+                  </div>
+                  <div className="flex-1 flex relative">
+                    {timeSlots.map(t => (
+                      <div key={t} className="w-[200px] shrink-0 p-4 text-xs font-bold text-zinc-500 border-r border-zinc-100">
+                        {formatTime(t)}
+                      </div>
+                    ))}
+                    {/* Current Time Indicator */}
+                    <div 
+                      className="absolute top-0 bottom-0 w-px bg-red-500 z-20"
+                      style={{ left: `${((currentTime - gridStart) / (gridEnd - gridStart)) * 100}%` }}
+                    >
+                      <div className="absolute top-0 -left-1 w-2 h-2 bg-red-500 rounded-full" />
+                    </div>
+                  </div>
+                </div>
+
+                {/* Channel Rows */}
+                <div className="divide-y divide-zinc-100">
+                  {activeChannels.map(c => {
+                    const p = playlists.find(pl => pl.id === c.playlistId);
+                    const mItems = (p?.mediaIds || []).map(id => allMedia.find(m => m.id === id)).filter(Boolean) as Media[];
+                    const epg = getDerivedEpg(p || null, mItems);
+                    
+                    // Filter programs that overlap with our grid window
+                    const gridPrograms = epg.filter(entry => 
+                      (entry.startTime >= gridStart && entry.startTime < gridEnd) ||
+                      (entry.endTime > gridStart && entry.endTime <= gridEnd) ||
+                      (entry.startTime <= gridStart && entry.endTime >= gridEnd)
+                    );
+
+                    return (
+                      <div key={c.id} className="flex group hover:bg-zinc-50/50 transition-colors">
+                        <div className="w-48 shrink-0 p-4 border-r border-zinc-200 flex items-center gap-3 bg-white sticky left-0 z-10 shadow-[2px_0_5px_rgba(0,0,0,0.02)]">
+                          <div className="h-8 w-8 rounded bg-zinc-900 text-white flex items-center justify-center font-bold text-xs shrink-0">
+                            {c.name.charAt(0)}
+                          </div>
+                          <div className="min-w-0">
+                            <p className="text-sm font-bold text-zinc-900 truncate">{c.name}</p>
+                            <p className="text-[10px] text-zinc-400 font-medium uppercase tracking-tighter">Channel {c.channelSlug}</p>
+                          </div>
+                        </div>
+                        
+                        <div className="flex-1 flex relative h-20 overflow-hidden">
+                          {gridPrograms.map((entry, idx) => {
+                            const start = Math.max(entry.startTime, gridStart);
+                            const end = Math.min(entry.endTime, gridEnd);
+                            const left = ((start - gridStart) / (gridEnd - gridStart)) * 100;
+                            const width = ((end - start) / (gridEnd - gridStart)) * 100;
+                            const isNow = currentTime >= entry.startTime && currentTime < entry.endTime;
+
+                            return (
+                              <div 
+                                key={`${entry.mediaId}-${idx}`}
+                                className={cn(
+                                  "absolute top-0 bottom-0 border-r border-zinc-100 p-3 flex flex-col justify-center cursor-pointer transition-all",
+                                  isNow ? "bg-zinc-900 text-white z-10" : "bg-white hover:bg-zinc-50"
+                                )}
+                                style={{ left: `${left}%`, width: `${width}%` }}
+                                onClick={() => setSelectedChannelId(c.id)}
+                              >
+                                <p className={cn("text-xs font-bold truncate", isNow ? "text-white" : "text-zinc-900")}>
+                                  {displayName(entry)}
+                                </p>
+                                <p className={cn("text-[10px] truncate", isNow ? "text-zinc-400" : "text-zinc-500")}>
+                                  {formatTime(entry.startTime)} - {formatTime(entry.endTime)}
+                                </p>
+                              </div>
+                            );
+                          })}
+                        </div>
+                      </div>
+                    );
+                  })}
+                </div>
+              </div>
+            </div>
+          </Card>
+        ) : (
+          <div className="grid gap-6">
+            {activeChannels.map(c => {
             const p = playlists.find(pl => pl.id === c.playlistId);
             const mItems = (p?.mediaIds || []).map(id => allMedia.find(m => m.id === id)).filter(Boolean) as Media[];
             const epg = getDerivedEpg(p || null, mItems);
@@ -271,17 +397,30 @@ export function EPGViewer({ channelId, epgData: externalEpg }: EPGViewerProps) {
                           {now ? displayName(now) : "No Program Data"}
                         </h4>
                         {now && (
-                          <div className="flex items-center gap-2 mt-1">
-                            <div className="flex-1 h-1 bg-zinc-100 rounded-full overflow-hidden">
-                              <div 
-                                className="h-full bg-zinc-900" 
-                                style={{ width: `${((currentTime - now.startTime) / (now.endTime - now.startTime)) * 100}%` }}
-                              />
+                          <>
+                            <div className="flex items-center gap-2 mt-1">
+                              <div className="flex-1 h-1 bg-zinc-100 rounded-full overflow-hidden">
+                                <div 
+                                  className="h-full bg-zinc-900" 
+                                  style={{ width: `${((currentTime - now.startTime) / (now.endTime - now.startTime)) * 100}%` }}
+                                />
+                              </div>
+                              <span className="text-[10px] font-mono text-zinc-500">
+                                {formatTime(now.startTime)} - {formatTime(now.endTime)}
+                              </span>
                             </div>
-                            <span className="text-[10px] font-mono text-zinc-500">
-                              -{formatTimeRemaining(now.endTime - currentTime)}
-                            </span>
-                          </div>
+                            <div className="flex items-center gap-2 mt-1">
+                              <div className="flex-1 h-1 bg-zinc-100 rounded-full overflow-hidden">
+                                <div 
+                                  className="h-full bg-zinc-900" 
+                                  style={{ width: `${((currentTime - now.startTime) / (now.endTime - now.startTime)) * 100}%` }}
+                                />
+                              </div>
+                              <span className="text-[10px] font-mono text-zinc-500">
+                                -{formatTimeRemaining(now.endTime - currentTime)}
+                              </span>
+                            </div>
+                          </>
                         )}
                       </div>
 
@@ -292,7 +431,10 @@ export function EPGViewer({ channelId, epgData: externalEpg }: EPGViewerProps) {
                               {entry.thumbnailUrl && <img src={entry.thumbnailUrl} className="w-full h-full object-cover" referrerPolicy="no-referrer" />}
                             </div>
                             <div className="min-w-0">
-                              <p className="text-[10px] font-bold text-zinc-400 uppercase">Next</p>
+                              <div className="flex items-center justify-between">
+                                <p className="text-[10px] font-bold text-zinc-400 uppercase">Next</p>
+                                <span className="text-[10px] font-mono text-zinc-500">{formatTime(entry.startTime)}</span>
+                              </div>
                               <p className="text-xs font-medium text-zinc-900 truncate">{displayName(entry)}</p>
                             </div>
                           </div>
@@ -311,16 +453,17 @@ export function EPGViewer({ channelId, epgData: externalEpg }: EPGViewerProps) {
             );
           })}
 
-          {channels.filter(c => c.status === "online").length === 0 && (
+          {activeChannels.length === 0 && (
             <div className="py-24 text-center bg-zinc-50 rounded-2xl border border-zinc-200 border-dashed">
               <Radio className="h-12 w-12 mx-auto text-zinc-200 mb-4" />
               <p className="text-zinc-500">No active channels currently broadcasting.</p>
             </div>
           )}
         </div>
-      </div>
-    );
-  }
+      )}
+    </div>
+  );
+}
 
   return (
     <div className="space-y-8">
@@ -425,49 +568,81 @@ export function EPGViewer({ channelId, epgData: externalEpg }: EPGViewerProps) {
         )}
       </section>
 
-      {/* Coming Up Next Section */}
+      {/* Full Schedule Section */}
       <section>
-        <div className="flex items-center gap-2 mb-4">
-          <Clock className="h-5 w-5 text-zinc-400" />
-          <h2 className="text-lg font-bold text-zinc-900 uppercase tracking-wider">Coming Up Next</h2>
+        <div className="flex items-center justify-between mb-4">
+          <div className="flex items-center gap-2">
+            <Clock className="h-5 w-5 text-zinc-400" />
+            <h2 className="text-lg font-bold text-zinc-900 uppercase tracking-wider">Full Schedule</h2>
+          </div>
+          <Badge variant="outline" className="text-zinc-400 border-zinc-200">
+            {new Date().toLocaleDateString([], { weekday: 'long', month: 'long', day: 'numeric' })}
+          </Badge>
         </div>
 
-        <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
-          {comingUp.map((entry, idx) => (
-            <Card key={`${entry.mediaId}-${idx}`} className="p-4 bg-white hover:shadow-md transition-shadow">
-              <div className="aspect-video bg-zinc-100 rounded-lg mb-4 overflow-hidden">
-                {entry.thumbnailUrl ? (
-                  <img 
-                    src={entry.thumbnailUrl} 
-                    alt={entry.songTitle}
-                    className="w-full h-full object-cover"
-                    referrerPolicy="no-referrer"
-                  />
-                ) : (
-                  <div className="w-full h-full flex items-center justify-center text-zinc-300">
-                    <Music className="h-8 w-8" />
+        <Card className="overflow-hidden border-zinc-200">
+          <div className="divide-y divide-zinc-100">
+            {derivedEpg.map((entry, idx) => {
+              const isNow = currentTime >= entry.startTime && currentTime < entry.endTime;
+              const isPast = currentTime > entry.endTime;
+              
+              return (
+                <div 
+                  key={`${entry.mediaId}-${idx}`} 
+                  className={cn(
+                    "flex items-center gap-6 p-4 transition-colors",
+                    isNow ? "bg-zinc-900 text-white" : "bg-white hover:bg-zinc-50",
+                    isPast && "opacity-50"
+                  )}
+                >
+                  <div className="w-24 shrink-0 font-mono text-sm font-bold">
+                    {formatTime(entry.startTime)}
                   </div>
-                )}
-              </div>
-              <div className="space-y-1">
-                <h4 className="font-bold text-zinc-900 truncate">{displayName(entry)}</h4>
-                <div className="pt-2 flex items-center justify-between">
-                  <Badge variant="secondary" className="text-[10px] py-0 px-1.5">
-                    {entry.genre.toUpperCase()}
-                  </Badge>
-                  <span className="text-xs font-medium text-zinc-400">
-                    in {formatTimeRemaining(entry.startTime - currentTime)}
-                  </span>
+                  
+                  <div className="w-16 h-10 rounded bg-zinc-100 shrink-0 overflow-hidden border border-zinc-200">
+                    {entry.thumbnailUrl ? (
+                      <img src={entry.thumbnailUrl} className="w-full h-full object-cover" referrerPolicy="no-referrer" />
+                    ) : (
+                      <div className="w-full h-full flex items-center justify-center text-zinc-300">
+                        <Music className="h-4 w-4" />
+                      </div>
+                    )}
+                  </div>
+
+                  <div className="flex-1 min-w-0">
+                    <div className="flex items-center gap-2">
+                      <h4 className={cn("font-bold truncate", isNow ? "text-white" : "text-zinc-900")}>
+                        {displayName(entry)}
+                      </h4>
+                      {isNow && <Badge className="bg-red-600 border-none text-[10px] h-4">LIVE</Badge>}
+                    </div>
+                    <p className={cn("text-xs", isNow ? "text-zinc-400" : "text-zinc-500")}>
+                      {entry.genre.toUpperCase()} • {Math.round((entry.endTime - entry.startTime) / 60)} min
+                    </p>
+                  </div>
+
+                  <div className="hidden md:flex items-center gap-3">
+                    {entry.instagramUrl && (
+                      <a href={entry.instagramUrl} target="_blank" rel="noreferrer" className={isNow ? "text-zinc-500 hover:text-white" : "text-zinc-300 hover:text-zinc-600"}>
+                        <Instagram className="h-4 w-4" />
+                      </a>
+                    )}
+                    {entry.twitterUrl && (
+                      <a href={entry.twitterUrl} target="_blank" rel="noreferrer" className={isNow ? "text-zinc-500 hover:text-white" : "text-zinc-300 hover:text-zinc-600"}>
+                        <Twitter className="h-4 w-4" />
+                      </a>
+                    )}
+                  </div>
                 </div>
+              );
+            })}
+            {derivedEpg.length === 0 && (
+              <div className="p-12 text-center text-zinc-400 italic">
+                No scheduled programming found for this channel.
               </div>
-            </Card>
-          ))}
-          {comingUp.length === 0 && (
-            <div className="col-span-full py-8 text-center text-zinc-400 italic">
-              End of scheduled programming.
-            </div>
-          )}
-        </div>
+            )}
+          </div>
+        </Card>
       </section>
 
       {/* EPG Import Section */}

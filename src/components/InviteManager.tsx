@@ -12,17 +12,30 @@ interface InviteManagerProps {
 export function InviteManager({ accountId }: InviteManagerProps) {
   const [invites, setInvites] = useState<any[]>([]);
   const [loading, setLoading] = useState(true);
-  const [newInvite, setNewInvite] = useState({ email: "", role: "user" });
+  const [newInvite, setNewInvite] = useState({ email: "", role: "user", accountId: accountId || "" });
+  const [allAccounts, setAllAccounts] = useState<any[]>([]);
+  const isMasterAdmin = auth.currentUser?.email === "lookhumaster@gmail.com" || auth.currentUser?.email === "rpduece@gmail.com";
 
   useEffect(() => {
-    if (!accountId) {
+    if (isMasterAdmin) {
+      const q = collection(db, "accounts");
+      const unsubscribe = onSnapshot(q, (snap) => {
+        setAllAccounts(snap.docs.map(doc => ({ id: doc.id, ...doc.data() })));
+      });
+      return () => unsubscribe();
+    }
+  }, [isMasterAdmin]);
+
+  useEffect(() => {
+    const targetAccountId = isMasterAdmin ? newInvite.accountId : accountId;
+    if (!targetAccountId) {
       setLoading(false);
       return;
     }
 
     const q = query(
       collection(db, "invitations"),
-      where("accountId", "==", accountId)
+      where("accountId", "==", targetAccountId)
     );
 
     const unsubscribe = onSnapshot(q, (snap) => {
@@ -31,11 +44,12 @@ export function InviteManager({ accountId }: InviteManagerProps) {
     });
 
     return () => unsubscribe();
-  }, [accountId]);
+  }, [accountId, newInvite.accountId, isMasterAdmin]);
 
   const handleSendInvite = async (e: React.FormEvent) => {
     e.preventDefault();
-    if (!accountId) return;
+    const targetAccountId = isMasterAdmin ? newInvite.accountId : accountId;
+    if (!targetAccountId) return;
 
     try {
       const token = await auth.currentUser?.getIdToken();
@@ -45,12 +59,12 @@ export function InviteManager({ accountId }: InviteManagerProps) {
           "Content-Type": "application/json",
           Authorization: `Bearer ${token}`
         },
-        body: JSON.stringify({ ...newInvite, accountId })
+        body: JSON.stringify({ ...newInvite, accountId: targetAccountId })
       });
 
       if (res.ok) {
         toast.success("Invitation sent successfully");
-        setNewInvite({ email: "", role: "user" });
+        setNewInvite({ email: "", role: "user", accountId: targetAccountId });
       } else {
         const data = await res.json();
         toast.error(data.error || "Failed to send invitation");
@@ -60,7 +74,7 @@ export function InviteManager({ accountId }: InviteManagerProps) {
     }
   };
 
-  if (!accountId) {
+  if (!accountId && !isMasterAdmin) {
     return (
       <div className="bg-zinc-50 p-12 rounded-2xl border-2 border-dashed border-zinc-200 text-center">
         <Mail className="h-12 w-12 text-zinc-300 mx-auto mb-4" />
@@ -82,6 +96,20 @@ export function InviteManager({ accountId }: InviteManagerProps) {
       <div className="bg-white p-6 rounded-xl border border-zinc-200 shadow-sm space-y-4">
         <h3 className="font-bold text-zinc-900">Send New Invite</h3>
         <form onSubmit={handleSendInvite} className="flex flex-col md:flex-row gap-4">
+          {isMasterAdmin && (
+            <div className="w-full md:w-48 space-y-1">
+              <label className="text-xs font-bold text-zinc-500 uppercase">Target Account</label>
+              <select
+                required
+                className="w-full rounded-lg border border-zinc-200 px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-zinc-900"
+                value={newInvite.accountId}
+                onChange={e => setNewInvite({ ...newInvite, accountId: e.target.value })}
+              >
+                <option value="">Select Account</option>
+                {allAccounts.map(acc => <option key={acc.id} value={acc.id}>{acc.name}</option>)}
+              </select>
+            </div>
+          )}
           <div className="flex-1 space-y-1">
             <label className="text-xs font-bold text-zinc-500 uppercase">Email Address</label>
             <input

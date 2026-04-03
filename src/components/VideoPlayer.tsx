@@ -9,6 +9,7 @@ interface VideoPlayerProps {
   autoPlay?: boolean;
   loop?: boolean;
   controls?: boolean;
+  onError?: (error: any) => void;
 }
 
 export function VideoPlayer({ 
@@ -17,7 +18,8 @@ export function VideoPlayer({
   muted = true, 
   autoPlay = true, 
   loop = false, 
-  controls = true 
+  controls = true,
+  onError
 }: VideoPlayerProps) {
   const videoRef = useRef<HTMLVideoElement>(null);
 
@@ -25,18 +27,43 @@ export function VideoPlayer({
     const video = videoRef.current;
     if (!video) return;
 
-    const isHls = src.endsWith(".m3u8");
+    const isHls = src.toLowerCase().includes(".m3u8") || src.includes("workers.dev");
 
     if (isHls) {
       if (Hls.isSupported()) {
-        const hls = new Hls();
+        const hls = new Hls({
+          enableWorker: true,
+          backBufferLength: 60
+        });
+        
         hls.loadSource(src);
         hls.attachMedia(video);
+        
         hls.on(Hls.Events.MANIFEST_PARSED, () => {
           if (autoPlay) {
             video.play().catch(() => {
               console.log("Autoplay blocked, waiting for user interaction");
             });
+          }
+        });
+
+        hls.on(Hls.Events.ERROR, (event, data) => {
+          if (data.fatal) {
+            if (onError) onError(data);
+            switch (data.type) {
+              case Hls.ErrorTypes.NETWORK_ERROR:
+                console.log("Fatal network error encountered, trying to recover");
+                hls.startLoad();
+                break;
+              case Hls.ErrorTypes.MEDIA_ERROR:
+                console.log("Fatal media error encountered, trying to recover");
+                hls.recoverMediaError();
+                break;
+              default:
+                console.log("Fatal error, cannot recover");
+                hls.destroy();
+                break;
+            }
           }
         });
 

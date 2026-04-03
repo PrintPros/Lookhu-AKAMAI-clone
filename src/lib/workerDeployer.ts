@@ -163,9 +163,9 @@ async function handleEPG(env, ctx, corsHeaders) {
     const windowStart = now - 3600;
     const windowEnd = now + 86400;
 
-    const channelId = \`rag-\${env.CHANNEL_SLUG}\`;
+    const channelId = \`fastfasts-\${env.CHANNEL_SLUG}\`;
     let xml = '<?xml version="1.0" encoding="UTF-8"?>\\n';
-    xml += '<tv generator-info-name="RAG.org">\\n';
+    xml += '<tv generator-info-name="FastFasts">\\n';
     xml += \`  <channel id="\${channelId}">\\n\`;
     xml += \`    <display-name>\${env.CHANNEL_SLUG}</display-name>\\n\`;
     xml += \`  </channel>\\n\`;
@@ -271,7 +271,7 @@ export async function deployChannelWorker(params: {
   epoch: number;
 }) {
   const { accountId, cfApiToken, channelSlug, manifestBucketUrl, epoch } = params;
-  const scriptName = `rag-${channelSlug}`;
+  const scriptName = `fastfasts-${channelSlug}`;
 
   try {
     // 1. Prepare metadata with bindings
@@ -346,7 +346,7 @@ export async function deployChannelWorker(params: {
  * Deletes a channel Worker from Cloudflare.
  */
 export async function deleteChannelWorker(accountId: string, cfApiToken: string, channelSlug: string) {
-  const scriptName = `rag-${channelSlug}`;
+  const scriptName = `fastfasts-${channelSlug}`;
   try {
     const response = await fetch(
       `https://api.cloudflare.com/client/v4/accounts/${accountId}/workers/scripts/${scriptName}`,
@@ -366,7 +366,7 @@ export async function deleteChannelWorker(accountId: string, cfApiToken: string,
  * Checks the status of a Cloudflare Worker.
  */
 export async function getWorkerStatus(accountId: string, cfApiToken: string, channelSlug: string) {
-  const scriptName = `rag-${channelSlug}`;
+  const scriptName = `fastfasts-${channelSlug}`;
   try {
     const response = await fetch(
       `https://api.cloudflare.com/client/v4/accounts/${accountId}/workers/scripts/${scriptName}`,
@@ -398,7 +398,7 @@ export async function deploySchedulerWorker(params: {
   schedulerSecret: string;
 }) {
   const { accountId, cfApiToken, appUrl, schedulerSecret } = params;
-  const scriptName = "rag-scheduler";
+  const scriptName = "fastfasts-scheduler";
 
   const schedulerScript = `
 export default {

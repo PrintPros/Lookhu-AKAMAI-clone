@@ -12,7 +12,8 @@ import {
   Megaphone,
   ShieldCheck,
   Mail,
-  Users
+  Users,
+  User
 } from "lucide-react";
 import { cn } from "../lib/utils";
 import { Button } from "./ui/Button";
@@ -36,6 +37,7 @@ export function Sidebar({
 }: SidebarProps) {
   const menuItems = [
     { id: "dashboard", label: "Dashboard", icon: LayoutDashboard },
+    { id: "profile", label: "My Profile", icon: User, badge: pendingInvites },
     { id: "channels", label: "Channels", icon: Radio },
     { id: "embed", label: "Embed Options", icon: Share2 },
     { id: "ads", label: "Ad Settings", icon: Megaphone },    
@@ -44,7 +46,6 @@ export function Sidebar({
     { id: "submissions", label: "Artist Submissions", icon: UserPlus, badge: pendingSubmissions },
     { id: "epg", label: "EPG Viewer", icon: Calendar },
     { id: "cloudflare", label: "Cloudflare", icon: Cloud },    
-    { id: "my-invites", label: "My Invites", icon: Mail, badge: pendingInvites },
     { id: "settings", label: "Settings", icon: Settings },
   ];
 
@@ -58,7 +59,7 @@ export function Sidebar({
   return (
     <div className="flex h-screen w-64 flex-col border-r border-zinc-200 bg-white p-4">
       <div className="mb-8 px-2">
-        <h1 className="text-xl font-black tracking-tight text-zinc-900">RAG.ORG</h1>
+        <h1 className="text-xl font-black tracking-tight text-zinc-900 uppercase">FastFasts</h1>
         <p className="text-[10px] text-zinc-500 uppercase tracking-[0.2em] font-bold mt-0.5">Fast Channel Platform</p>
         {role && (
           <div className="mt-2 inline-flex items-center rounded-full bg-zinc-100 px-2 py-0.5 text-[10px] font-bold text-zinc-600 uppercase tracking-wider">

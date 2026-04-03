@@ -28,8 +28,13 @@ export function AdminDashboard() {
       ]);
 
       if (accountsRes.ok && usersRes.ok) {
-        setAccounts(await accountsRes.json());
-        setUsers(await usersRes.json());
+        const accountsData = await accountsRes.json();
+        const usersData = await usersRes.json();
+        console.log("Fetched users:", usersData);
+        setAccounts(accountsData);
+        setUsers(usersData);
+      } else {
+        console.error("Failed to fetch admin data:", accountsRes.status, usersRes.status);
       }
     } catch (err) {
       toast.error("Failed to fetch admin data");
@@ -161,6 +166,7 @@ export function AdminDashboard() {
                     <div>
                       <p className="font-bold text-zinc-900 text-sm">{u.displayName || "Anonymous"}</p>
                       <p className="text-xs text-zinc-500">{u.email}</p>
+                      <p className="text-[10px] text-zinc-400 font-mono">UID: {u.id}</p>
                     </div>
                   </div>
                   <div className="flex flex-col items-end gap-1">

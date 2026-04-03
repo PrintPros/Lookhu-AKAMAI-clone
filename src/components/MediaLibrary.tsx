@@ -3,7 +3,7 @@ import { Upload, FileVideo, Play, Trash2, CheckCircle2, Clock, AlertCircle, Libr
 import { Button } from "./ui/Button";
 import { Card, CardContent, CardHeader, CardTitle } from "./ui/Card";
 import { Badge } from "./ui/Badge";
-import { Media } from "../types";
+import { CloudflareConfig, Media } from "../types";
 import { collection, query, where, onSnapshot, addDoc, deleteDoc, doc, updateDoc, limit, getDocs } from "firebase/firestore";
 import { db, auth } from "../firebase";
 import { handleFirestoreError, OperationType } from "../lib/firestore-errors";
@@ -22,6 +22,8 @@ export function MediaLibrary() {
   const [editingMedia, setEditingMedia] = useState<Media | null>(null);
   const [hoveredId, setHoveredId] = useState<string | null>(null);
   const [showUploadForm, setShowUploadForm] = useState(false);
+  const [repairing, setRepairing] = useState(false);
+  const [cfConfigs, setCfConfigs] = useState<CloudflareConfig[]>([]);
   const [selectedFile, setSelectedFile] = useState<File | null>(null);
   const [uploadMetadata, setUploadMetadata] = useState({
     songTitle: "",
@@ -65,6 +67,73 @@ export function MediaLibrary() {
       unsubscribe();
     };
   }, []);
+
+  useEffect(() => {
+    if (!auth.currentUser) return;
+    const q = query(collection(db, "cloudflareConfigs"), where("userId", "==", auth.currentUser.uid));
+    const unsubscribe = onSnapshot(q, (snapshot) => {
+      setCfConfigs(snapshot.docs.map(d => ({ ...d.data(), id: d.id })) as CloudflareConfig[]);
+    });
+    return () => unsubscribe();
+  }, []);
+
+  const handleRepairDurations = async () => {
+    const missing = media.filter(m => !m.duration && m.bucketName && m.r2Path);
+    if (missing.length === 0) {
+      toast.info("No media items need repairing.");
+      return;
+    }
+
+    setRepairing(true);
+    let repaired = 0;
+    let failed = 0;
+
+    try {
+      for (const item of missing) {
+        const config = cfConfigs.find(c => c.bucketName === item.bucketName);
+        if (!config) {
+          failed++;
+          continue;
+        }
+
+        try {
+          const key = item.r2Path ? `${item.r2Path}/index.m3u8` : "index.m3u8";
+          const response = await fetch("/api/r2/metadata", {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({
+              accountId: config.accountId,
+              r2AccessKeyId: config.r2AccessKeyId,
+              r2SecretAccessKey: config.r2SecretAccessKey,
+              bucketName: config.bucketName,
+              key: key
+            })
+          });
+
+          if (!response.ok) throw new Error("Failed to fetch metadata");
+          const data = await response.json();
+          
+          if (data.duration) {
+            await updateDoc(doc(db, "media", item.id), {
+              duration: data.duration
+            });
+            repaired++;
+          } else {
+            failed++;
+          }
+        } catch (err) {
+          console.error(`Failed to repair ${item.id}:`, err);
+          failed++;
+        }
+      }
+
+      toast.success(`Repaired ${repaired} items. ${failed > 0 ? `${failed} failed.` : ""}`);
+    } catch (err: any) {
+      toast.error(err.message || "Repair failed");
+    } finally {
+      setRepairing(false);
+    }
+  };
 
   const handleFileSelect = (e: React.ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0];
@@ -160,23 +229,36 @@ export function MediaLibrary() {
           <h2 className="text-2xl font-bold tracking-tight text-zinc-900">Media Library</h2>
           <p className="text-zinc-500">Manage and upload your music video assets.</p>
         </div>
-        <div className="relative">
-          <input
-            type="file"
-            id="file-upload"
-            className="hidden"
-            accept="video/mp4"
-            onChange={handleFileSelect}
-            disabled={uploading}
-          />
-          <label htmlFor="file-upload">
-            <Button asChild disabled={uploading} className="cursor-pointer">
-              <span>
-                <Upload className="mr-2 h-4 w-4" />
-                {uploading ? "Uploading..." : "Upload Video"}
-              </span>
+        <div className="flex items-center gap-2">
+          {media.some(m => !m.duration && m.bucketName && m.r2Path) && (
+            <Button 
+              variant="outline" 
+              onClick={handleRepairDurations} 
+              disabled={repairing}
+              className="border-amber-200 bg-amber-50 text-amber-700 hover:bg-amber-100 hover:text-amber-800"
+            >
+              <Clock className={cn("mr-2 h-4 w-4", repairing && "animate-spin")} />
+              {repairing ? "Repairing..." : "Repair Durations"}
             </Button>
-          </label>
+          )}
+          <div className="relative">
+            <input
+              type="file"
+              id="file-upload"
+              className="hidden"
+              accept="video/mp4"
+              onChange={handleFileSelect}
+              disabled={uploading}
+            />
+            <label htmlFor="file-upload">
+              <Button asChild disabled={uploading} className="cursor-pointer">
+                <span>
+                  <Upload className="mr-2 h-4 w-4" />
+                  {uploading ? "Uploading..." : "Upload Video"}
+                </span>
+              </Button>
+            </label>
+          </div>
         </div>
       </div>
 

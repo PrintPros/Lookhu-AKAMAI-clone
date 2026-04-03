@@ -206,7 +206,7 @@ export function AdSettings() {
             </div>
             <div className="space-y-2">
               <div className="text-zinc-500 text-xs font-bold uppercase">Compliance</div>
-              <p className="text-sm text-zinc-300">Ensure your ad tags are CORS-enabled for the RAG.org domain to prevent playback errors.</p>
+              <p className="text-sm text-zinc-300">Ensure your ad tags are CORS-enabled for the FastFasts domain to prevent playback errors.</p>
             </div>
           </div>
 
@@ -216,7 +216,7 @@ export function AdSettings() {
               <span>Ad settings apply to all active channels unless overridden.</span>
             </div>
             <a 
-              href="https://docs.rag.org/monetization" 
+              href="https://docs.fastfasts.com/monetization" 
               target="_blank" 
               rel="noreferrer"
               className="text-xs font-bold text-white hover:underline flex items-center gap-1"

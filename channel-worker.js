@@ -200,9 +200,9 @@ async function handleEPG(env, ctx, corsHeaders) {
     const windowStart = now - 3600; // 1 hour back
     const windowEnd = now + 86400;  // 24 hours forward
 
-    const channelId = `rag-${env.CHANNEL_SLUG}`;
+    const channelId = `fastfasts-${env.CHANNEL_SLUG}`;
     let xml = '<?xml version="1.0" encoding="UTF-8"?>\n';
-    xml += '<tv generator-info-name="RAG.org">\n';
+    xml += '<tv generator-info-name="FastFasts">\n';
     xml += `  <channel id="${channelId}">\n`;
     xml += `    <display-name>${env.CHANNEL_SLUG}</display-name>\n`;
     xml += `  </channel>\n`;

@@ -223,7 +223,7 @@ service cloud.firestore {
 
     match /accounts/{accountId} {
       allow read: if isAccountMember(accountId);
-      allow create: if isMasterAdmin() && isValidAccount(request.resource.data);
+      allow create: if (isMasterAdmin() || isAdmin()) && isValidAccount(request.resource.data);
       allow update: if (isMasterAdmin() || (isAdmin() && isAccountMember(accountId))) && isValidAccount(request.resource.data);
       allow delete: if isMasterAdmin();
     }

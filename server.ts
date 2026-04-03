@@ -102,9 +102,16 @@ async function startServer() {
   const isMasterAdmin = async (uid: string) => {
     if (!dbAdmin) return false;
     const userDoc = await dbAdmin.collection("users").doc(uid).get();
-    if (!userDoc.exists) return false;
+    if (!userDoc.exists) {
+      console.log(`isMasterAdmin: User ${uid} not found`);
+      return false;
+    }
     const userData = userDoc.data();
-    return userData.role === "master_admin" || userData.email === "lookhumaster@gmail.com" || userData.email === "rpduece@gmail.com";
+    const isMaster = userData.role === "master_admin" || userData.email === "lookhumaster@gmail.com" || userData.email === "rpduece@gmail.com";
+    if (!isMaster) {
+      console.log(`isMasterAdmin: User ${uid} is not master admin. Role: ${userData.role}, Email: ${userData.email}`);
+    }
+    return isMaster;
   };
 
   // Helper to verify account admin
@@ -314,6 +321,33 @@ async function startServer() {
     }
   });
 
+  app.post("/api/r2/metadata", async (req, res) => {
+    const { accountId, r2AccessKeyId, r2SecretAccessKey, bucketName, key } = req.body;
+    if (!accountId || !r2AccessKeyId || !r2SecretAccessKey || !bucketName || !key) {
+      return res.status(400).json({ error: "Missing fields" });
+    }
+    try {
+      const r2 = createR2Client(accountId, r2AccessKeyId, r2SecretAccessKey);
+      const getCmd = new GetObjectCommand({ Bucket: bucketName, Key: key });
+      const obj = await r2.send(getCmd);
+      const body = await obj.Body?.transformToString();
+      if (!body) throw new Error("Empty manifest");
+
+      const lines = body.split("\n");
+      let duration = 0;
+      lines.forEach(line => {
+        if (line.startsWith("#EXTINF:")) {
+          const val = parseFloat(line.replace("#EXTINF:", "").split(",")[0]);
+          if (!isNaN(val)) duration += val;
+        }
+      });
+
+      res.json({ duration: Math.round(duration) });
+    } catch (err: any) {
+      res.status(500).json({ error: err.message });
+    }
+  });
+
   app.post("/api/r2/scan", async (req, res) => {
     const { accountId, r2AccessKeyId, r2SecretAccessKey,
             bucketName, publicBaseUrl } = req.body;
@@ -336,19 +370,30 @@ async function startServer() {
 
         for (const m of manifests) {
           const key = m.Key!;
-          const dirPath = key.replace(/\/index\.m3u8$/, "");
-          const pathParts = dirPath.split("/");
-          const id = dirPath.replace(/\//g, "-");
-          const name = pathParts.slice(-3).join(" / ");
+          const dirPath = key.includes("/") ? key.substring(0, key.lastIndexOf("/")) : "";
+          const pathParts = dirPath ? dirPath.split("/") : ["root"];
+          const id = dirPath ? dirPath.replace(/\//g, "-") : "root";
+          const name = dirPath ? pathParts.slice(-3).join(" / ") : "Root Folder";
 
           try {
             const getCmd = new GetObjectCommand({ Bucket: bucketName, Key: key });
             const obj = await r2.send(getCmd);
             const body = await obj.Body?.transformToString();
             if (body) {
-              const segmentLines = body.split("\n").filter(
+              const lines = body.split("\n");
+              const segmentLines = lines.filter(
                 l => l.trim() && !l.startsWith("#")
               );
+              
+              // Calculate duration from #EXTINF lines
+              let duration = 0;
+              lines.forEach(line => {
+                if (line.startsWith("#EXTINF:")) {
+                  const val = parseFloat(line.replace("#EXTINF:", "").split(",")[0]);
+                  if (!isNaN(val)) duration += val;
+                }
+              });
+
               const segmentCount = segmentLines.length;
               const firstSeg = segmentLines[0]?.split("/").pop() || "";
               const match = firstSeg.match(/^([a-zA-Z_-]+?)(\d+)\.ts$/);
@@ -360,6 +405,7 @@ async function startServer() {
                 name,
                 path: dirPath,
                 segments: segmentCount,
+                duration: Math.round(duration),
                 prefix,
                 pad,
                 m3u8Url: `${publicBaseUrl}/${key}`,
@@ -545,18 +591,18 @@ async function startServer() {
 
       // 4. Upload segments to R2
       const files = fs.readdirSync(segDir);
-      let totalBytes = 0;
-      for (const file of files) {
-        const filePath = path.join(segDir, file);
-        const fileContent = fs.readFileSync(filePath);
-        totalBytes += fileContent.length;
-        await r2.send(new PutObjectCommand({
-          Bucket: bucketName,
-          Key: `streams/${videoId}/${file}`,
-          Body: fileContent,
-          ContentType: file.endsWith(".m3u8")
-            ? "application/x-mpegURL"
-            : "video/mp2t",
+      const BATCH_SIZE = 10;
+      for (let i = 0; i < files.length; i += BATCH_SIZE) {
+        const batch = files.slice(i, i + BATCH_SIZE);
+        await Promise.all(batch.map(async (file) => {
+          const filePath = path.join(segDir, file);
+          const fileContent = fs.readFileSync(filePath);
+          await r2.send(new PutObjectCommand({
+            Bucket: bucketName,
+            Key: `streams/${videoId}/${file}`,
+            Body: fileContent,
+            ContentType: file.endsWith(".m3u8") ? "application/x-mpegURL" : "video/mp2t",
+          }));
         }));
       }
 
@@ -667,7 +713,8 @@ async function startServer() {
 
           const channelUpdate: any = {
             lastPublishedAt: new Date().toISOString(),
-            workerManifestUrl: `${workerUrl}/index.m3u8`
+            workerManifestUrl: `${workerUrl}/index.m3u8`,
+            epoch: epoch
           };
 
           // 8. Optionally re-deploy Worker
@@ -768,6 +815,17 @@ async function startServer() {
       });
 
       if (!deployResult.success) throw new Error(deployResult.error);
+
+      // Update channel with worker URL and epoch
+      if (dbAdmin) {
+        await dbAdmin.collection("channels").doc(channelId).update({
+          workerManifestUrl: deployResult.workerUrl + "/index.m3u8",
+          lastPublishedAt: new Date().toISOString(),
+          epoch: epoch,
+          workerDeployed: true,
+          workerNeedsRedeploy: false
+        });
+      }
 
       res.json({
         success: true,

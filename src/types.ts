@@ -9,7 +9,7 @@ export interface Media {
   createdAt: string;
   userId: string;
   public?: boolean;
-  // RAG.org music video fields (all optional so existing code still compiles)
+  // FastFasts music video fields (all optional so existing code still compiles)
   artistName?: string;
   songTitle?: string;
   genre?: string;             // "hiphop" | "rock" | "edm" | "rnb" | "latin" | "other"
@@ -50,10 +50,12 @@ export interface Channel {
     autoPlay: boolean;
     muted: boolean;
     controls: boolean;
+    skin?: "default" | "v1";
   };
   lastPublishedAt?: string;
   workerDeployed?: boolean;
   workerNeedsRedeploy?: boolean;
+  epoch?: number; // Unix timestamp (seconds) when the loop started
 }
 
 export interface Playlist {

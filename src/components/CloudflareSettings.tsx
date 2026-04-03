@@ -332,14 +332,15 @@ export function CloudflareSettings() {
       for (const program of toImport) {
         await addDoc(collection(db, "media"), {
           name: program.id,
-          songTitle: program.id.replace(/-/g, " "),
+          songTitle: program.id === "root" ? "Root Video" : program.id.replace(/-/g, " "),
           artistName: "Unknown Artist",
           m3u8Url: program.m3u8Url,
           status: "ready",
+          duration: program.duration,
           userId: auth.currentUser?.uid,
           createdAt: new Date().toISOString(),
           bucketName: config.bucketName,
-          r2Path: program.path,
+          r2Path: program.id === "root" ? "" : program.path,
           segmentCount: program.segments,
           segmentDuration: 6,
           segmentPrefix: program.prefix,
