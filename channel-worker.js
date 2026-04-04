@@ -94,16 +94,20 @@ async function handlePlaylist(request, env, ctx, corsHeaders) {
     playlist += `#EXT-X-TARGETDURATION:${segDur}\n`;
     playlist += `#EXT-X-MEDIA-SEQUENCE:${startSeq}\n`;
 
-    // Count discontinuities mathematically — full loops plus partial
-    const fullLoops = Math.floor(Math.max(0, startGlobalSeq) / totalSegments);
-    // Count boundary crossings in one full loop
+   // Count discontinuities per full loop including wrap boundary
     let discsPerLoop = 0;
     for (let i = 1; i < totalSegments; i++) {
       if (allSegments[i].program.id !== allSegments[i - 1].program.id) discsPerLoop++;
     }
-    // Count partial loop remainder
-    const remainder = Math.max(0, startGlobalSeq) % totalSegments;
+    if (allSegments[totalSegments - 1].program.id !== allSegments[0].program.id) discsPerLoop++;
+
+    const safeStart = Math.max(0, startGlobalSeq);
+    const fullLoops = Math.floor(safeStart / totalSegments);
+    const remainder = safeStart % totalSegments;
     let partialDiscs = 0;
+    if (remainder > 0 && allSegments[0].program.id !== allSegments[totalSegments - 1].program.id) {
+      partialDiscs++;
+    }
     for (let i = 1; i < remainder; i++) {
       if (allSegments[i].program.id !== allSegments[i - 1].program.id) partialDiscs++;
     }
