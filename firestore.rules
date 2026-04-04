@@ -87,6 +87,12 @@ service cloud.firestore {
     function isAccountMember(accountId) {
       return isAuthenticated() && (isMasterAdmin() || getUserData().accountId == accountId);
     }
+    function isSameAccount(userId) {
+      return isAuthenticated() && exists(/databases/$(database)/documents/users/$(request.auth.uid)) &&
+             exists(/databases/$(database)/documents/users/$(userId)) &&
+             get(/databases/$(database)/documents/users/$(userId)).data.accountId != null &&
+             get(/databases/$(database)/documents/users/$(userId)).data.accountId == getUserData().accountId;
+    }
     function isOwner(userId) {
       return isAuthenticated() && request.auth.uid == userId;
     }
@@ -216,15 +222,15 @@ service cloud.firestore {
       allow read: if isAuthenticated() && (
         resource.data.userId == request.auth.uid || 
         isMasterAdmin() ||
-        (exists(/databases/$(database)/documents/users/$(request.auth.uid)) && 
-         exists(/databases/$(database)/documents/users/$(resource.data.userId)) &&
-         get(/databases/$(database)/documents/users/$(resource.data.userId)).data.accountId != null &&
-         get(/databases/$(database)/documents/users/$(resource.data.userId)).data.accountId == getUserData().accountId)
+        isSameAccount(resource.data.userId)
       );
-      allow create: if isAuthenticated() && isValidMedia(request.resource.data);
-      allow update: if isAuthenticated() && (isDocOwner() || isMasterAdmin()) && isValidMedia(request.resource.data) &&
+      allow create: if isAuthenticated() && isValidMedia(request.resource.data) && (
+        request.resource.data.userId == request.auth.uid ||
+        isSameAccount(request.resource.data.userId)
+      );
+      allow update: if isAuthenticated() && (isDocOwner() || isMasterAdmin() || isSameAccount(resource.data.userId)) && isValidMedia(request.resource.data) &&
                     (request.resource.data.userId == resource.data.userId);
-      allow delete: if isAuthenticated() && (isDocOwner() || isMasterAdmin());
+      allow delete: if isAuthenticated() && (isDocOwner() || isMasterAdmin() || isSameAccount(resource.data.userId));
     }
 
     match /accounts/{accountId} {
@@ -245,28 +251,28 @@ service cloud.firestore {
       allow read: if isAuthenticated() && (
         resource.data.userId == request.auth.uid || 
         isMasterAdmin() ||
-        (exists(/databases/$(database)/documents/users/$(request.auth.uid)) && 
-         exists(/databases/$(database)/documents/users/$(resource.data.userId)) &&
-         get(/databases/$(database)/documents/users/$(resource.data.userId)).data.accountId != null &&
-         get(/databases/$(database)/documents/users/$(resource.data.userId)).data.accountId == getUserData().accountId)
+        isSameAccount(resource.data.userId)
       );
-      allow create: if isAuthenticated() && isValidChannel(request.resource.data);
-      allow update: if isAuthenticated() && (isDocOwner() || isMasterAdmin()) && isValidChannel(request.resource.data);
-      allow delete: if isAuthenticated() && (isDocOwner() || isMasterAdmin());
+      allow create: if isAuthenticated() && isValidChannel(request.resource.data) && (
+        request.resource.data.userId == request.auth.uid ||
+        isSameAccount(request.resource.data.userId)
+      );
+      allow update: if isAuthenticated() && (isDocOwner() || isMasterAdmin() || isSameAccount(resource.data.userId)) && isValidChannel(request.resource.data);
+      allow delete: if isAuthenticated() && (isDocOwner() || isMasterAdmin() || isSameAccount(resource.data.userId));
     }
 
     match /playlists/{playlistId} {
       allow read: if isAuthenticated() && (
         resource.data.userId == request.auth.uid || 
         isMasterAdmin() ||
-        (exists(/databases/$(database)/documents/users/$(request.auth.uid)) && 
-         exists(/databases/$(database)/documents/users/$(resource.data.userId)) &&
-         get(/databases/$(database)/documents/users/$(resource.data.userId)).data.accountId != null &&
-         get(/databases/$(database)/documents/users/$(resource.data.userId)).data.accountId == getUserData().accountId)
+        isSameAccount(resource.data.userId)
       );
-      allow create: if isAuthenticated() && isValidPlaylist(request.resource.data);
-      allow update: if isAuthenticated() && isDocOwner() && isValidPlaylist(request.resource.data);
-      allow delete: if isAuthenticated() && isDocOwner();
+      allow create: if isAuthenticated() && isValidPlaylist(request.resource.data) && (
+        request.resource.data.userId == request.auth.uid ||
+        isSameAccount(request.resource.data.userId)
+      );
+      allow update: if isAuthenticated() && (isDocOwner() || isMasterAdmin() || isSameAccount(resource.data.userId)) && isValidPlaylist(request.resource.data);
+      allow delete: if isAuthenticated() && (isDocOwner() || isMasterAdmin() || isSameAccount(resource.data.userId));
     }
 
     match /scheduledPublishes/{publishId} {
