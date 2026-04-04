@@ -87,19 +87,23 @@ async function handlePlaylist(request, env, ctx, corsHeaders) {
       });
     }
 
-    // Start DVR_SEGMENTS back from current position
-    const startFlatIndex = ((currentFlatIndex - DVR_SEGMENTS) % totalSegments + totalSegments) % totalSegments;
-    const startSeq = Math.max(0, globalSeq - DVR_SEGMENTS);
+    // Sequence numbers derived purely from globalSeq — monotonically increasing, never wraps
+    const startGlobalSeq = globalSeq - DVR_SEGMENTS;
+    const startSeq = Math.max(0, startGlobalSeq);
 
     let playlist = "#EXTM3U\\n";
     playlist += "#EXT-X-VERSION:3\\n";
     playlist += \`#EXT-X-TARGETDURATION:\${segDur}\\n\`;
     playlist += \`#EXT-X-MEDIA-SEQUENCE:\${startSeq}\\n\`;
+
+    // Count discontinuities before the window
     let discontinuityCount = 0;
-    for (let i = 0; i < startFlatIndex; i++) {
-      if (i > 0 && allSegments[i].program.id !== allSegments[i-1].program.id) {
-        discontinuityCount++;
-      }
+    let prevProgId = null;
+    for (let i = 0; i < Math.max(0, startGlobalSeq); i++) {
+      const fi = ((i % totalSegments) + totalSegments) % totalSegments;
+      const pid = allSegments[fi].program.id;
+      if (prevProgId !== null && pid !== prevProgId) discontinuityCount++;
+      prevProgId = pid;
     }
     playlist += \`#EXT-X-DISCONTINUITY-SEQUENCE:\${discontinuityCount}\\n\`;
 
@@ -107,7 +111,8 @@ async function handlePlaylist(request, env, ctx, corsHeaders) {
     let segmentTime = now - (DVR_SEGMENTS * segDur);
 
     for (let i = 0; i < DVR_SEGMENTS; i++) {
-      const flatIndex = (startFlatIndex + i) % totalSegments;
+      const seq = startGlobalSeq + i;
+      const flatIndex = ((seq % totalSegments) + totalSegments) % totalSegments;
       const { program, segIndex } = allSegments[flatIndex];
 
       // Add discontinuity and date-time at program boundaries
