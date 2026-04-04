@@ -59,10 +59,29 @@ export function VideoPlayer({
         });
 
         hls.on(Hls.Events.ERROR, (event, data) => {
-          // Handle non-fatal buffer append errors by flushing and recovering
+          // Handle buffer append errors by doing a full source reload
           if (data.details === "bufferAppendError" || data.details === "bufferFull") {
-            console.log("Buffer append error — flushing and recovering");
-            hls.recoverMediaError();
+            console.log("Buffer append error — reloading source");
+            const currentSrc = src;
+            hls.destroy();
+            setTimeout(() => {
+              const newHls = new Hls({
+                enableWorker: true,
+                backBufferLength: 60,
+                forceKeyFrameOnDiscontinuity: true,
+                manifestLoadingMaxRetry: 3,
+                levelLoadingMaxRetry: 3,
+                fragLoadingMaxRetry: 3,
+                nudgeMaxRetry: 5,
+                nudgeOffset: 0.1,
+                startFragPrefetch: false,
+              });
+              newHls.loadSource(currentSrc);
+              newHls.attachMedia(video);
+              newHls.on(Hls.Events.MANIFEST_PARSED, () => {
+                video.play().catch(() => {});
+              });
+            }, 1000);
             return;
           }
 
