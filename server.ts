@@ -744,6 +744,8 @@ async function startServer() {
         mediaId: mediaId || "new",
         segmentCount,
         duration,
+        m3u8Url: `${publicBaseUrl}/streams/${videoId}/index.m3u8`,
+        r2Path: `streams/${videoId}`,
       });
 
     } catch (err: any) {

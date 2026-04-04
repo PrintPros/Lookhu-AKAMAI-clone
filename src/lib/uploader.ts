@@ -143,22 +143,22 @@ export async function uploadVideoToR2(
     throw new Error(errorData.error || "Transcoding failed");
   }
 
-  const { segmentCount, duration } = await transcodeResp.json();
+  const transcodeData = await transcodeResp.json();
+  const { segmentCount, duration, m3u8Url, r2Path } = transcodeData;
 
-  // 5. Update Firestore with final metadata
+  // 5. Update Firestore with final metadata from server response
   if (mediaId) {
-    const updateData: any = {
+    await updateDoc(doc(db, "media", mediaId), {
       status: "ready",
-      ...(cfData.publicBaseUrl && { m3u8Url: `${cfData.publicBaseUrl}/streams/${videoId}/index.m3u8` }),
-      ...(segmentCount !== undefined && { segmentCount }),
-      ...(duration !== undefined && { duration }),
-      ...(6 !== undefined && { segmentDuration: 6 }),
-      ...("segment_" !== undefined && { segmentPrefix: "segment_" }),
-      ...(4 !== undefined && { segmentPad: 4 }),
-      ...(videoId && { r2Path: `streams/${videoId}` }),
-      ...(cfData.bucketName && { bucketName: cfData.bucketName }),
-    };
-    await updateDoc(doc(db, "media", mediaId), updateData);
+      m3u8Url: m3u8Url || `${cfData.publicBaseUrl}/streams/${videoId}/index.m3u8`,
+      segmentCount,
+      duration,
+      segmentDuration: 6,
+      segmentPrefix: "segment_",
+      segmentPad: 4,
+      r2Path: r2Path || `streams/${videoId}`,
+      bucketName: cfData.bucketName,
+    });
   }
 
   onProgress("done", 100, "Upload complete!");
