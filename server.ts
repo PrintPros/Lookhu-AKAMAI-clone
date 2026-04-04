@@ -621,7 +621,20 @@ async function startServer() {
       return res.status(400).json({ error: "Missing required fields" });
     }
 
-    const videoId = mp4Key.replace("uploads/", "").replace(".mp4", "");
+    const rawVideoId = mp4Key.replace("uploads/", "").replace(".mp4", "");
+    const artist = metadata?.artistName || "";
+    const title = metadata?.songTitle || "";
+    const slugBase = artist && title
+      ? `${artist}-${title}`
+      : (artist || title || rawVideoId);
+    const videoId = slugBase
+      .toLowerCase()
+      .trim()
+      .replace(/[^\w\s-]/g, "")
+      .replace(/[\s_]+/g, "-")
+      .replace(/^-+|-+$/g, "")
+      .substring(0, 60) // cap length
+      + "-" + rawVideoId.split("-")[0]; // append timestamp prefix for uniqueness
     const tmpDir = path.join(process.cwd(), "uploads", videoId);
     const rawPath = path.join(tmpDir, "original.mp4");
     const segDir = path.join(tmpDir, "segments");
