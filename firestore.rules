@@ -219,11 +219,7 @@ service cloud.firestore {
     }
 
     match /media/{mediaId} {
-      allow read: if isAuthenticated() && (
-        resource.data.userId == request.auth.uid || 
-        isMasterAdmin() ||
-        isSameAccount(resource.data.userId)
-      );
+      allow read: if true;
       allow create: if isAuthenticated() && isValidMedia(request.resource.data) && (
         request.resource.data.userId == request.auth.uid ||
         isSameAccount(request.resource.data.userId)
@@ -248,11 +244,7 @@ service cloud.firestore {
     }
 
     match /channels/{channelId} {
-      allow read: if isAuthenticated() && (
-        resource.data.userId == request.auth.uid || 
-        isMasterAdmin() ||
-        isSameAccount(resource.data.userId)
-      );
+      allow read: if true;
       allow create: if isAuthenticated() && isValidChannel(request.resource.data) && (
         request.resource.data.userId == request.auth.uid ||
         isSameAccount(request.resource.data.userId)
@@ -262,11 +254,7 @@ service cloud.firestore {
     }
 
     match /playlists/{playlistId} {
-      allow read: if isAuthenticated() && (
-        resource.data.userId == request.auth.uid || 
-        isMasterAdmin() ||
-        isSameAccount(resource.data.userId)
-      );
+      allow read: if true;
       allow create: if isAuthenticated() && isValidPlaylist(request.resource.data) && (
         request.resource.data.userId == request.auth.uid ||
         isSameAccount(request.resource.data.userId)
