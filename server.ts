@@ -624,7 +624,9 @@ async function startServer() {
             "-level 3.0",
             "-c:a aac",
             "-ar 44100",
+            "-ac 2",
             "-b:a 128k",
+            "-af aresample=async=1:first_pts=0",
             "-vf scale=-2:720",
             "-crf 23",
             "-preset fast",
@@ -665,6 +667,23 @@ async function startServer() {
 
       // 5. Count segments
       const segmentCount = files.filter(f => f.endsWith(".ts")).length;
+
+      // 6. Save to Firestore via Admin SDK
+      if (mediaId && dbAdmin) {
+        await dbAdmin.collection("media").doc(mediaId).set({
+          status: "ready",
+          m3u8Url: `${publicBaseUrl}/streams/${videoId}/index.m3u8`,
+          segmentCount,
+          duration,
+          segmentDuration: 6,
+          segmentPrefix: "segment_",
+          segmentPad: 4,
+          r2Path: `streams/${videoId}`,
+          bucketName,
+        }, { merge: true });
+      } else {
+        console.warn("Skipping Firestore update — dbAdmin unavailable or no mediaId");
+      }
 
       // 7. Delete original MP4 now that segments are confirmed
       try {
