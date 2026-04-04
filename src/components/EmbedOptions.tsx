@@ -88,13 +88,13 @@ export function EmbedOptions({ profile }: EmbedOptionsProps) {
   const publicOrigin = getPublicOrigin();
   const isDevOrigin = window.location.origin.includes("ais-dev-");
 
-  const embedCode = `<iframe 
-  src="${publicOrigin}/embed/${selectedChannelId}?autoplay=${settings.autoPlay ?? true}&muted=${settings.muted ?? true}&controls=${settings.controls ?? true}&skin=${selectedSkin}" 
-  width="${settings.width || "100%"}" 
-  height="${settings.height || "100%"}" 
-  frameborder="0" 
-  allowfullscreen
-></iframe>`;
+  const embedCode = `<div style="position:relative;padding-bottom:56.25%;height:0;overflow:hidden;max-width:100%;">
+  <iframe 
+    src="${publicOrigin}/embed/${selectedChannelId}?autoplay=${settings.autoPlay ?? true}&muted=${settings.muted ?? true}&controls=${settings.controls ?? true}&skin=${selectedSkin}" 
+    style="position:absolute;top:0;left:0;width:100%;height:100%;border:0;" 
+    allowfullscreen
+  ></iframe>
+</div>`;
 
   const handleCopy = () => {
     navigator.clipboard.writeText(embedCode);

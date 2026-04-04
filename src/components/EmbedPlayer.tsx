@@ -30,9 +30,27 @@ export function EmbedPlayer({ channelId, skin: skinProp }: EmbedPlayerProps) {
     muted: true,
     controls: true
   });
+  const videoRef = useRef<HTMLVideoElement>(null);
   const [isPlaying, setIsPlaying] = useState(true);
   const [volume, setVolume] = useState(1);
   const [isMuted, setIsMuted] = useState(true);
+
+  const handlePlayPause = () => {
+    const video = document.querySelector("video");
+    if (!video) return;
+    if (isPlaying) {
+      video.pause();
+    } else {
+      video.play();
+    }
+    setIsPlaying(!isPlaying);
+  };
+
+  const handleFullscreen = () => {
+    const video = document.querySelector("video");
+    if (!video) return;
+    if (video.requestFullscreen) video.requestFullscreen();
+  };
 
   useEffect(() => {
     const timer = setInterval(() => {
@@ -259,7 +277,7 @@ export function EmbedPlayer({ channelId, skin: skinProp }: EmbedPlayerProps) {
                 <div className="flex items-center justify-between">
                   <div className="flex items-center gap-6">
                     <button 
-                      onClick={() => setIsPlaying(!isPlaying)}
+                      onClick={handlePlayPause}
                       className="hover:text-blue-400 transition-colors"
                     >
                       {isPlaying ? <Pause className="h-6 w-6 fill-current" /> : <Play className="h-6 w-6 fill-current" />}
@@ -281,7 +299,7 @@ export function EmbedPlayer({ channelId, skin: skinProp }: EmbedPlayerProps) {
                   <button className="text-zinc-400 hover:text-white transition-colors">
                     <Settings className="h-5 w-5" />
                   </button>
-                  <button className="text-zinc-400 hover:text-white transition-colors">
+                  <button onClick={handleFullscreen} className="text-zinc-400 hover:text-white transition-colors">
                     <Maximize className="h-5 w-5" />
                   </button>
                 </div>
