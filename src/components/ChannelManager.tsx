@@ -126,7 +126,7 @@ export function ChannelManager({ setActiveTab, profile }: ChannelManagerProps) {
       unsubscribeCloudflare();
       unsubscribeScheduled();
     };
-  }, []);
+  }, [profile]);
 
   const getChannelStreamUrl = (channel: Channel) => {
     if (channel.workerManifestUrl) return channel.workerManifestUrl;
