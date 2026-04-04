@@ -132,7 +132,7 @@ function SortableItem({ id, mediaId, index, item, onRemove }: SortableItemProps)
   );
 }
 
-export function PlaylistEditor() {
+export function PlaylistEditor({ profile }: { profile: any }) {
   const [playlists, setPlaylists] = useState<Playlist[]>([]);
   const [media, setMedia] = useState<Media[]>([]);
   const [isCreating, setIsCreating] = useState(false);
@@ -151,17 +151,18 @@ export function PlaylistEditor() {
   );
 
   useEffect(() => {
-    if (!auth.currentUser) return;
+    if (!auth.currentUser || !profile) return;
 
-    const playlistsQ = query(
-      collection(db, "playlists"),
-      where("userId", "==", auth.currentUser.uid)
-    );
+    const isMaster = profile.role === "master_admin";
+    const targetUserId = isMaster ? null : (profile.ownerUserId || auth.currentUser.uid);
 
-    const mediaQ = query(
-      collection(db, "media"),
-      where("userId", "==", auth.currentUser.uid)
-    );
+    let playlistsQ = query(collection(db, "playlists"));
+    let mediaQ = query(collection(db, "media"));
+
+    if (targetUserId) {
+      playlistsQ = query(playlistsQ, where("userId", "==", targetUserId));
+      mediaQ = query(mediaQ, where("userId", "==", targetUserId));
+    }
 
     const unsubscribePlaylists = onSnapshot(playlistsQ, (snapshot) => {
       setPlaylists(snapshot.docs.map((doc) => ({ ...doc.data(), id: doc.id })) as Playlist[]);

@@ -17,9 +17,10 @@ import { toast } from "sonner";
 
 interface ChannelManagerProps {
   setActiveTab?: (tab: string) => void;
+  profile: any;
 }
 
-export function ChannelManager({ setActiveTab }: ChannelManagerProps) {
+export function ChannelManager({ setActiveTab, profile }: ChannelManagerProps) {
   const [channels, setChannels] = useState<Channel[]>([]);
   const [playlists, setPlaylists] = useState<Playlist[]>([]);
   const [media, setMedia] = useState<Media[]>([]);
@@ -62,34 +63,24 @@ export function ChannelManager({ setActiveTab }: ChannelManagerProps) {
   };
 
   useEffect(() => {
-    if (!auth.currentUser) return;
+    if (!auth.currentUser || !profile) return;
 
-    const channelsQ = query(
-      collection(db, "channels"),
-      where("userId", "==", auth.currentUser.uid)
-    );
+    const isMaster = profile.role === "master_admin";
+    const targetUserId = isMaster ? null : (profile.ownerUserId || auth.currentUser.uid);
 
-    const playlistsQ = query(
-      collection(db, "playlists"),
-      where("userId", "==", auth.currentUser.uid)
-    );
+    let channelsQ = query(collection(db, "channels"));
+    let playlistsQ = query(collection(db, "playlists"));
+    let mediaQ = query(collection(db, "media"));
+    let cloudflareQ = query(collection(db, "cloudflareConfigs"));
+    let scheduledQ = query(collection(db, "scheduledPublishes"), orderBy("scheduledAt", "desc"), limit(20));
 
-    const mediaQ = query(
-      collection(db, "media"),
-      where("userId", "==", auth.currentUser.uid)
-    );
-
-    const cloudflareQ = query(
-      collection(db, "cloudflareConfigs"),
-      where("userId", "==", auth.currentUser.uid)
-    );
-
-    const scheduledQ = query(
-      collection(db, "scheduledPublishes"),
-      where("createdBy", "==", auth.currentUser.uid),
-      orderBy("scheduledAt", "desc"),
-      limit(20)
-    );
+    if (targetUserId) {
+      channelsQ = query(channelsQ, where("userId", "==", targetUserId));
+      playlistsQ = query(playlistsQ, where("userId", "==", targetUserId));
+      mediaQ = query(mediaQ, where("userId", "==", targetUserId));
+      cloudflareQ = query(cloudflareQ, where("userId", "==", targetUserId));
+      scheduledQ = query(scheduledQ, where("createdBy", "==", targetUserId));
+    }
 
     const unsubscribeChannels = onSnapshot(channelsQ, (snapshot) => {
       setChannels(snapshot.docs.map((doc) => ({ ...doc.data(), id: doc.id })) as Channel[]);

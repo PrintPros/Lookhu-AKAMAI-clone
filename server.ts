@@ -277,7 +277,8 @@ async function startServer() {
       // Update user profile
       await dbAdmin.collection("users").doc(decodedToken.uid).update({
         accountId: inviteData.accountId,
-        role: inviteData.role
+        role: inviteData.role,
+        ownerUserId: inviteData.invitedBy
       });
 
       // Add to account members

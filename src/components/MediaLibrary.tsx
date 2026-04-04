@@ -15,7 +15,7 @@ import { cn } from "../lib/utils";
 import { uploadVideoToR2 } from "../lib/uploader";
 import { toast } from "sonner";
 
-export function MediaLibrary() {
+export function MediaLibrary({ profile }: { profile: any }) {
   const [media, setMedia] = useState<Media[]>([]);
   const [uploading, setUploading] = useState(false);
   const [previewMedia, setPreviewMedia] = useState<Media | null>(null);
@@ -46,12 +46,15 @@ export function MediaLibrary() {
     });
 
   useEffect(() => {
-    if (!auth.currentUser) return;
+    if (!auth.currentUser || !profile) return;
 
-    const q = query(
-      collection(db, "media"),
-      where("userId", "==", auth.currentUser.uid)
-    );
+    const isMaster = profile.role === "master_admin";
+    const targetUserId = isMaster ? null : (profile.ownerUserId || auth.currentUser.uid);
+
+    let q = query(collection(db, "media"));
+    if (targetUserId) {
+      q = query(q, where("userId", "==", targetUserId));
+    }
 
     const unsubscribe = onSnapshot(q, (snapshot) => {
       const mediaData = snapshot.docs.map((doc) => ({

@@ -11,9 +11,11 @@ import { Badge } from "./ui/Badge";
 import { VideoPlayer } from "./VideoPlayer";
 import { EmbedPlayer } from "./EmbedPlayer";
 
-interface EmbedOptionsProps {}
+interface EmbedOptionsProps {
+  profile: any;
+}
 
-export function EmbedOptions() {
+export function EmbedOptions({ profile }: EmbedOptionsProps) {
   const [channels, setChannels] = useState<Channel[]>([]);
   const [playlists, setPlaylists] = useState<Playlist[]>([]);
   const [media, setMedia] = useState<Media[]>([]);
@@ -22,21 +24,22 @@ export function EmbedOptions() {
   const [copied, setCopied] = useState(false);
 
   useEffect(() => {
-    if (!auth.currentUser) return;
+    if (!auth.currentUser || !profile) return;
+    const effectiveUserId = profile?.ownerUserId || auth.currentUser.uid;
 
     const channelsQ = query(
       collection(db, "channels"),
-      where("userId", "==", auth.currentUser.uid)
+      where("userId", "==", effectiveUserId)
     );
 
     const playlistsQ = query(
       collection(db, "playlists"),
-      where("userId", "==", auth.currentUser.uid)
+      where("userId", "==", effectiveUserId)
     );
 
     const mediaQ = query(
       collection(db, "media"),
-      where("userId", "==", auth.currentUser.uid)
+      where("userId", "==", effectiveUserId)
     );
 
     const unsubscribeChannels = onSnapshot(channelsQ, (snapshot) => {

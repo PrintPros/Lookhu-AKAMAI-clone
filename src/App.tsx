@@ -129,13 +129,13 @@ export default function App() {
       case "dashboard":
         return <Dashboard profile={profile} />;
       case "channels":
-        return <ChannelManager setActiveTab={setActiveTab} />;
+        return <ChannelManager setActiveTab={setActiveTab} profile={profile} />;
       case "media":
-        return <MediaLibrary />;
+        return <MediaLibrary profile={profile} />;
       case "playlists":
-        return <PlaylistEditor />;
+        return <PlaylistEditor profile={profile} />;
       case "embed":
-        return <EmbedOptions />;
+        return <EmbedOptions profile={profile} />;
       case "submissions":
         return <ArtistSubmissions />;
       case "cloudflare":

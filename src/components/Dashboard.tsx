@@ -48,14 +48,11 @@ export function Dashboard({ profile }: { profile: any }) {
     let playlistsQ = query(collection(db, "playlists"));
 
     // Apply account filtering if not master admin
-    if (!isMaster && profile.accountId) {
-      channelsQ = query(channelsQ, where("accountId", "==", profile.accountId));
-      mediaQ = query(mediaQ, where("accountId", "==", profile.accountId));
-      playlistsQ = query(playlistsQ, where("accountId", "==", profile.accountId));
-    } else if (!isMaster) {
-      // Regular user without account should see nothing
-      setStats({ channels: 0, media: 0, playlists: 0, liveChannels: 0, pendingSubmissions: 0, totalArtists: 0 });
-      return;
+    if (!isMaster) {
+      const targetUserId = profile.ownerUserId || auth.currentUser.uid;
+      channelsQ = query(channelsQ, where("userId", "==", targetUserId));
+      mediaQ = query(mediaQ, where("userId", "==", targetUserId));
+      playlistsQ = query(playlistsQ, where("userId", "==", targetUserId));
     } else {
       // Master admin sees everything
     }
