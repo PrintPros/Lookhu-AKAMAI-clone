@@ -16,6 +16,8 @@ import { uploadVideoToR2 } from "../lib/uploader";
 import { toast } from "sonner";
 
 export function MediaLibrary({ profile }: { profile: any }) {
+  const [deleteTarget, setDeleteTarget] = useState<Media | null>(null);
+  const [deletingR2, setDeletingR2] = useState(false);
   const [media, setMedia] = useState<Media[]>([]);
   const [uploading, setUploading] = useState(false);
   const [previewMedia, setPreviewMedia] = useState<Media | null>(null);
@@ -202,11 +204,33 @@ export function MediaLibrary({ profile }: { profile: any }) {
     }
   };
 
-  const handleDelete = async (id: string) => {
+  const handleDelete = async (deleteFromR2: boolean) => {
+    if (!deleteTarget) return;
+    setDeletingR2(true);
     try {
-      await deleteDoc(doc(db, "media", id));
+      if (deleteFromR2 && deleteTarget.r2Path && deleteTarget.bucketName) {
+        const config = cfConfigs.find(c => c.bucketName === deleteTarget.bucketName);
+        if (config) {
+          await fetch("/api/r2/delete-folder", {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({
+              accountId: config.accountId,
+              r2AccessKeyId: config.r2AccessKeyId,
+              r2SecretAccessKey: config.r2SecretAccessKey,
+              bucketName: deleteTarget.bucketName,
+              prefix: deleteTarget.r2Path,
+            }),
+          });
+        }
+      }
+      await deleteDoc(doc(db, "media", deleteTarget.id));
+      toast.success(deleteFromR2 ? "Deleted from library and R2" : "Deleted from library only");
     } catch (error) {
-      handleFirestoreError(error, OperationType.DELETE, `media/${id}`);
+      handleFirestoreError(error, OperationType.DELETE, `media/${deleteTarget.id}`);
+    } finally {
+      setDeletingR2(false);
+      setDeleteTarget(null);
     }
   };
 
@@ -449,7 +473,7 @@ export function MediaLibrary({ profile }: { profile: any }) {
                     size="icon" 
                     variant="ghost" 
                     className="rounded-full h-8 w-8 text-white hover:text-red-500"
-                    onClick={() => handleDelete(item.id)}
+                    onClick={() => setDeleteTarget(item)}
                   >
                     <Trash2 className="h-4 w-4" />
                   </Button>
@@ -625,6 +649,48 @@ export function MediaLibrary({ profile }: { profile: any }) {
           </div>
         </div>
       </Dialog>
+      {deleteTarget && (
+        <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-50 p-4">
+          <div className="bg-white rounded-2xl shadow-xl max-w-md w-full p-6 space-y-4">
+            <h3 className="text-lg font-bold text-zinc-900">Delete Media</h3>
+            <p className="text-zinc-600 text-sm">
+              Delete <span className="font-semibold">{deleteTarget.artistName} — {deleteTarget.songTitle}</span> from the library?
+            </p>
+            {deleteTarget.r2Path && (
+              <div className="bg-amber-50 border border-amber-200 rounded-lg p-3 text-sm text-amber-800">
+                Also delete the HLS segments from R2 storage? This frees up storage space but cannot be undone.
+              </div>
+            )}
+            <div className="flex flex-col gap-2 pt-2">
+              {deleteTarget.r2Path && (
+                <Button
+                  className="w-full bg-red-600 hover:bg-red-700 text-white"
+                  onClick={() => handleDelete(true)}
+                  disabled={deletingR2}
+                >
+                  {deletingR2 ? "Deleting..." : "Delete from Library + R2 Storage"}
+                </Button>
+              )}
+              <Button
+                variant="outline"
+                className="w-full"
+                onClick={() => handleDelete(false)}
+                disabled={deletingR2}
+              >
+                Delete from Library Only
+              </Button>
+              <Button
+                variant="ghost"
+                className="w-full"
+                onClick={() => setDeleteTarget(null)}
+                disabled={deletingR2}
+              >
+                Cancel
+              </Button>
+            </div>
+          </div>
+        </div>
+      )}
     </div>
   );
 }

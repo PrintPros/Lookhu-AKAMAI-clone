@@ -310,6 +310,34 @@ async function startServer() {
     }
   });
 
+  app.post("/api/r2/delete-folder", async (req, res) => {
+    const { accountId, r2AccessKeyId, r2SecretAccessKey, bucketName, prefix } = req.body;
+    if (!accountId || !r2AccessKeyId || !r2SecretAccessKey || !bucketName || !prefix) {
+      return res.status(400).json({ error: "Missing fields" });
+    }
+    try {
+      const r2 = createR2Client(accountId, r2AccessKeyId, r2SecretAccessKey);
+      let continuationToken: string | undefined;
+      let deleted = 0;
+      do {
+        const list = await r2.send(new ListObjectsV2Command({
+          Bucket: bucketName,
+          Prefix: prefix,
+          ContinuationToken: continuationToken,
+        }));
+        const keys = (list.Contents || []).map(o => o.Key!).filter(Boolean);
+        for (const key of keys) {
+          await r2.send(new DeleteObjectCommand({ Bucket: bucketName, Key: key }));
+          deleted++;
+        }
+        continuationToken = list.IsTruncated ? list.NextContinuationToken : undefined;
+      } while (continuationToken);
+      res.json({ success: true, deleted });
+    } catch (err: any) {
+      res.status(500).json({ success: false, error: err.message });
+    }
+  });
+
   app.post("/api/r2/presign-secure", async (req, res) => {
     const authHeader = req.headers.authorization;
     if (!authHeader || !authHeader.startsWith("Bearer ")) {
