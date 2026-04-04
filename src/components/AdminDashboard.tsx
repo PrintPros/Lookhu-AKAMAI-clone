@@ -34,12 +34,39 @@ export function AdminDashboard() {
         setAccounts(accountsData);
         setUsers(usersData);
       } else {
-        console.error("Failed to fetch admin data:", accountsRes.status, usersRes.status);
+        const accountsError = await accountsRes.text();
+        const usersError = await usersRes.text();
+        console.error("Failed to fetch admin data:", accountsRes.status, accountsError, usersRes.status, usersError);
+        toast.error(`Failed to fetch admin data: ${accountsRes.status} / ${usersRes.status}`);
       }
     } catch (err) {
       toast.error("Failed to fetch admin data");
     } finally {
       setLoading(false);
+    }
+  };
+
+  const handleUpdateRole = async (userId: string, newRole: string) => {
+    try {
+      const token = await auth.currentUser?.getIdToken();
+      const res = await fetch("/api/admin/users/update-role", {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+          Authorization: `Bearer ${token}`
+        },
+        body: JSON.stringify({ userId, role: newRole })
+      });
+
+      if (res.ok) {
+        toast.success("Role updated successfully");
+        fetchData();
+      } else {
+        const data = await res.json();
+        toast.error(data.error || "Failed to update role");
+      }
+    } catch (err) {
+      toast.error("An error occurred");
     }
   };
 
@@ -170,13 +197,15 @@ export function AdminDashboard() {
                     </div>
                   </div>
                   <div className="flex flex-col items-end gap-1">
-                    <span className={cn(
-                      "text-[10px] font-bold px-2 py-0.5 rounded-full uppercase tracking-wider",
-                      u.role === "master_admin" ? "bg-red-100 text-red-700" : 
-                      u.role === "admin" ? "bg-blue-100 text-blue-700" : "bg-zinc-100 text-zinc-600"
-                    )}>
-                      {u.role || "user"}
-                    </span>
+                    <select
+                      className="text-[10px] font-bold px-2 py-0.5 rounded-full uppercase tracking-wider bg-zinc-100 text-zinc-600 cursor-pointer focus:ring-2 focus:ring-zinc-900"
+                      value={u.role || "user"}
+                      onChange={(e) => handleUpdateRole(u.id, e.target.value)}
+                    >
+                      <option value="user">User</option>
+                      <option value="admin">Admin</option>
+                      <option value="master_admin">Master Admin</option>
+                    </select>
                     {u.accountId && <p className="text-[10px] text-zinc-400">Account: {u.accountId.slice(0, 8)}...</p>}
                   </div>
                 </div>

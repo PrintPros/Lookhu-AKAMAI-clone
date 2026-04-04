@@ -35,18 +35,22 @@ export function Sidebar({
   pendingInvites = 0,
   role
 }: SidebarProps) {
+  const hasAccount = !!(role === "master_admin" || (role && role !== "user"));
+
   const menuItems = [
     { id: "dashboard", label: "Dashboard", icon: LayoutDashboard },
     { id: "profile", label: "My Profile", icon: User, badge: pendingInvites },
-    { id: "channels", label: "Channels", icon: Radio },
-    { id: "embed", label: "Embed Options", icon: Share2 },
-    { id: "ads", label: "Ad Settings", icon: Megaphone },    
-    { id: "playlists", label: "Playlists", icon: ListMusic },
-    { id: "media", label: "Media Library", icon: Library },
-    { id: "submissions", label: "Artist Submissions", icon: UserPlus, badge: pendingSubmissions },
-    { id: "epg", label: "EPG Viewer", icon: Calendar },
-    { id: "cloudflare", label: "Cloudflare", icon: Cloud },    
-    { id: "settings", label: "Settings", icon: Settings },
+    ...(hasAccount ? [
+      { id: "channels", label: "Channels", icon: Radio },
+      { id: "embed", label: "Embed Options", icon: Share2 },
+      { id: "ads", label: "Ad Settings", icon: Megaphone },    
+      { id: "playlists", label: "Playlists", icon: ListMusic },
+      { id: "media", label: "Media Library", icon: Library },
+      { id: "submissions", label: "Artist Submissions", icon: UserPlus, badge: pendingSubmissions },
+      { id: "epg", label: "EPG Viewer", icon: Calendar },
+      { id: "cloudflare", label: "Cloudflare", icon: Cloud },    
+      { id: "settings", label: "Settings", icon: Settings },
+    ] : [])
   ];
 
   const adminItems = [

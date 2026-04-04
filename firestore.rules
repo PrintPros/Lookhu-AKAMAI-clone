@@ -95,7 +95,7 @@ service cloud.firestore {
         (request.auth.uid == resource.data.userId) || 
         (request.auth.uid == resource.data.createdBy) ||
         (isMasterAdmin()) ||
-        (getUserData().role == 'admin' && getUserData().accountId == resource.data.accountId)
+        (isAccountMember(resource.data.accountId))
       );
     }
     function isValidEmail(email) {
@@ -213,7 +213,7 @@ service cloud.firestore {
     }
 
     match /media/{mediaId} {
-      allow read: if true; // Media metadata is public for player access
+      allow read: if isAuthenticated() && (resource.data.userId == request.auth.uid || isAccountMember(resource.data.accountId) || isMasterAdmin());
       allow create: if isAuthenticated() && isValidMedia(request.resource.data) && 
                     (request.resource.data.userId == request.auth.uid || isMasterAdmin());
       allow update: if isAuthenticated() && (isDocOwner() || isMasterAdmin()) && isValidMedia(request.resource.data) &&
@@ -236,7 +236,7 @@ service cloud.firestore {
     }
 
     match /channels/{channelId} {
-      allow read: if true; // Channels are public for viewers
+      allow read: if isAuthenticated() && (resource.data.userId == request.auth.uid || isAccountMember(resource.data.accountId) || isMasterAdmin());
       allow create: if isAuthenticated() && isValidChannel(request.resource.data) && 
                     (request.resource.data.userId == request.auth.uid || isMasterAdmin());
       allow update: if isAuthenticated() && (isDocOwner() || isMasterAdmin()) && isValidChannel(request.resource.data);
@@ -244,7 +244,7 @@ service cloud.firestore {
     }
 
     match /playlists/{playlistId} {
-      allow read: if true; // Playlists are public for player access
+      allow read: if isAuthenticated() && (resource.data.userId == request.auth.uid || isAccountMember(resource.data.accountId) || isMasterAdmin());
       allow create: if isAuthenticated() && isValidPlaylist(request.resource.data);
       allow update: if isAuthenticated() && isDocOwner() && isValidPlaylist(request.resource.data);
       allow delete: if isAuthenticated() && isDocOwner();

@@ -227,14 +227,14 @@ export function EmbedOptions() {
                       You are currently on a <span className="font-bold underline">Development URL</span>. 
                       Embed codes from this URL <span className="font-bold">WILL NOT WORK</span> on external websites (403 Error).
                     </p>
-                    <p className="text-xs text-red-700 leading-relaxed mt-2">
+                    <div className="text-xs text-red-700 leading-relaxed mt-2">
                       To fix this:
                       <ol className="list-decimal ml-4 mt-1 space-y-1">
                         <li>Click the <span className="font-bold">Share</span> button in the top right of AI Studio.</li>
                         <li>Open the <span className="font-bold underline text-blue-700">Shared App URL</span> provided.</li>
                         <li>Copy the embed code from that page instead.</li>
                       </ol>
-                    </p>
+                    </div>
                   </div>
                 </div>
               )}

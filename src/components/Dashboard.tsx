@@ -25,7 +25,7 @@ const relativeTime = (dateStr: string): string => {
   }
 };
 
-export function Dashboard() {
+export function Dashboard({ profile }: { profile: any }) {
   const [stats, setStats] = useState({
     channels: 0,
     media: 0,
@@ -38,22 +38,27 @@ export function Dashboard() {
   const [recentEvents, setRecentEvents] = useState<any[]>([]);
 
   useEffect(() => {
-    if (!auth.currentUser) return;
+    if (!auth.currentUser || !profile) return;
 
-    const channelsQ = query(
-      collection(db, "channels"),
-      where("userId", "==", auth.currentUser.uid)
-    );
-    const mediaQ = query(
-      collection(db, "media"),
-      where("userId", "==", auth.currentUser.uid),
-      orderBy("createdAt", "desc")
-    );
-    const playlistsQ = query(
-      collection(db, "playlists"),
-      where("userId", "==", auth.currentUser.uid)
-    );
-    const submissionsQ = query(collection(db, "submissions"));
+    const isMaster = profile.role === "master_admin";
+    
+    // Base queries
+    let channelsQ = query(collection(db, "channels"));
+    let mediaQ = query(collection(db, "media"), orderBy("createdAt", "desc"));
+    let playlistsQ = query(collection(db, "playlists"));
+
+    // Apply account filtering if not master admin
+    if (!isMaster && profile.accountId) {
+      channelsQ = query(channelsQ, where("accountId", "==", profile.accountId));
+      mediaQ = query(mediaQ, where("accountId", "==", profile.accountId));
+      playlistsQ = query(playlistsQ, where("accountId", "==", profile.accountId));
+    } else if (!isMaster) {
+      // Regular user without account should see nothing
+      setStats({ channels: 0, media: 0, playlists: 0, liveChannels: 0, pendingSubmissions: 0, totalArtists: 0 });
+      return;
+    } else {
+      // Master admin sees everything
+    }
 
     const unsubChannels = onSnapshot(channelsQ, (snapshot) => {
       const channels = snapshot.docs.map(d => d.data() as Channel);
@@ -97,6 +102,8 @@ export function Dashboard() {
       handleFirestoreError(error, OperationType.GET, "playlists");
     });
 
+    // Submissions are platform-wide
+    const submissionsQ = query(collection(db, "submissions"));
     const unsubSubmissions = onSnapshot(submissionsQ, (snapshot) => {
       const submissions = snapshot.docs.map(d => d.data());
       setStats(prev => ({ 
@@ -111,7 +118,7 @@ export function Dashboard() {
       unsubPlaylists();
       unsubSubmissions();
     };
-  }, []);
+  }, [profile]);
 
   const statCards = [
     { label: "Live Channels", value: stats.liveChannels, icon: Radio, color: "text-emerald-500", bg: "bg-emerald-50" },

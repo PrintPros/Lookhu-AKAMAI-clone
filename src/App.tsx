@@ -127,7 +127,7 @@ export default function App() {
   const renderContent = () => {
     switch (activeTab) {
       case "dashboard":
-        return <Dashboard />;
+        return <Dashboard profile={profile} />;
       case "channels":
         return <ChannelManager setActiveTab={setActiveTab} />;
       case "media":
@@ -155,7 +155,7 @@ export default function App() {
       case "my-invites":
         return <InvitationList userEmail={user.email} />;
       default:
-        return <Dashboard />;
+        return <Dashboard profile={profile} />;
     }
   };
 
@@ -169,6 +169,7 @@ export default function App() {
         pendingSubmissions={pendingCount}
         pendingInvites={pendingInvites}
         role={profile?.role}
+        accountId={profile?.accountId}
       />
       
       <main className="flex-1 overflow-y-auto p-8">

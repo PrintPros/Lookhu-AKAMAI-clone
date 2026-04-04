@@ -24,6 +24,9 @@ const configPath = path.join(process.cwd(), "firebase-applet-config.json");
 let firebaseConfig: any = {};
 if (fs.existsSync(configPath)) {
   firebaseConfig = JSON.parse(fs.readFileSync(configPath, "utf-8"));
+  console.log("Firebase config loaded:", firebaseConfig);
+} else {
+  console.error("Firebase config file not found at:", configPath);
 }
 
 let dbAdmin: any = null;
@@ -33,15 +36,26 @@ try {
   const apps = getApps();
   let adminApp: any;
   if (apps.length === 0) {
-    adminApp = initializeApp({ projectId: firebaseConfig.projectId });
+    if (!firebaseConfig.projectId) {
+      console.error("Firebase Admin initialization failed: projectId is missing in firebase-applet-config.json");
+    } else {
+      adminApp = initializeApp({ projectId: firebaseConfig.projectId });
+      console.log("Firebase Admin initialized with project:", firebaseConfig.projectId);
+    }
   } else {
     adminApp = apps[0];
+    console.log("Firebase Admin using existing app");
   }
-  dbAdmin = getFirestore(adminApp, firebaseConfig.firestoreDatabaseId || "(default)");
-  authAdmin = getAuth(adminApp);
-  console.log("Firebase Admin ready");
+  
+  if (adminApp) {
+    dbAdmin = getFirestore(adminApp, firebaseConfig.firestoreDatabaseId || "(default)");
+    authAdmin = getAuth(adminApp);
+    console.log("Firebase Admin ready. Using database:", firebaseConfig.firestoreDatabaseId || "(default)");
+  } else {
+    console.error("Firebase Admin initialization failed: adminApp is undefined");
+  }
 } catch (err) {
-  console.warn("Firebase Admin unavailable:", err);
+  console.error("Firebase Admin initialization error:", err);
 }
 
 function createR2Client(accountId: string, accessKeyId: string,
@@ -100,18 +114,26 @@ async function startServer() {
 
   // Helper to verify master admin
   const isMasterAdmin = async (uid: string) => {
-    if (!dbAdmin) return false;
-    const userDoc = await dbAdmin.collection("users").doc(uid).get();
-    if (!userDoc.exists) {
-      console.log(`isMasterAdmin: User ${uid} not found`);
+    if (!dbAdmin) {
+      console.error("isMasterAdmin: dbAdmin is null");
       return false;
     }
-    const userData = userDoc.data();
-    const isMaster = userData.role === "master_admin" || userData.email === "lookhumaster@gmail.com" || userData.email === "rpduece@gmail.com";
-    if (!isMaster) {
-      console.log(`isMasterAdmin: User ${uid} is not master admin. Role: ${userData.role}, Email: ${userData.email}`);
+    try {
+      const userDoc = await dbAdmin.collection("users").doc(uid).get();
+      if (!userDoc.exists) {
+        console.log(`isMasterAdmin: User ${uid} not found`);
+        return false;
+      }
+      const userData = userDoc.data();
+      const isMaster = userData.role === "master_admin" || userData.email === "lookhumaster@gmail.com" || userData.email === "rpduece@gmail.com";
+      if (!isMaster) {
+        console.log(`isMasterAdmin: User ${uid} is not master admin. Role: ${userData.role}, Email: ${userData.email}`);
+      }
+      return isMaster;
+    } catch (err) {
+      console.error("isMasterAdmin error:", err);
+      return false;
     }
-    return isMaster;
   };
 
   // Helper to verify account admin
@@ -130,12 +152,21 @@ async function startServer() {
     if (!authHeader?.startsWith("Bearer ")) return res.status(401).json({ error: "Unauthorized" });
     const idToken = authHeader.split("Bearer ")[1];
     try {
+      if (!authAdmin) {
+        console.error("authAdmin is null");
+        return res.status(500).json({ error: "authAdmin is null" });
+      }
       const decodedToken = await authAdmin.verifyIdToken(idToken);
       if (!(await isMasterAdmin(decodedToken.uid))) return res.status(403).json({ error: "Forbidden" });
+      if (!dbAdmin) {
+        console.error("dbAdmin is null");
+        return res.status(500).json({ error: "dbAdmin is null" });
+      }
       const snapshot = await dbAdmin.collection("accounts").get();
       const accounts = snapshot.docs.map((doc: any) => ({ id: doc.id, ...doc.data() }));
       res.json(accounts);
     } catch (err: any) {
+      console.error("Error in /api/admin/accounts:", err);
       res.status(500).json({ error: err.message });
     }
   });
@@ -146,11 +177,36 @@ async function startServer() {
     if (!authHeader?.startsWith("Bearer ")) return res.status(401).json({ error: "Unauthorized" });
     const idToken = authHeader.split("Bearer ")[1];
     try {
+      if (!authAdmin) {
+        console.error("authAdmin is null");
+        return res.status(500).json({ error: "authAdmin is null" });
+      }
       const decodedToken = await authAdmin.verifyIdToken(idToken);
       if (!(await isMasterAdmin(decodedToken.uid))) return res.status(403).json({ error: "Forbidden" });
+      if (!dbAdmin) {
+        console.error("dbAdmin is null");
+        return res.status(500).json({ error: "dbAdmin is null" });
+      }
       const snapshot = await dbAdmin.collection("users").get();
       const users = snapshot.docs.map((doc: any) => ({ id: doc.id, ...doc.data() }));
       res.json(users);
+    } catch (err: any) {
+      console.error("Error in /api/admin/users:", err);
+      res.status(500).json({ error: err.message });
+    }
+  });
+
+  // Master Admin: Update User Role
+  app.post("/api/admin/users/update-role", async (req, res) => {
+    const authHeader = req.headers.authorization;
+    if (!authHeader?.startsWith("Bearer ")) return res.status(401).json({ error: "Unauthorized" });
+    const idToken = authHeader.split("Bearer ")[1];
+    const { userId, role } = req.body;
+    try {
+      const decodedToken = await authAdmin.verifyIdToken(idToken);
+      if (!(await isMasterAdmin(decodedToken.uid))) return res.status(403).json({ error: "Forbidden" });
+      await dbAdmin.collection("users").doc(userId).update({ role });
+      res.json({ success: true });
     } catch (err: any) {
       res.status(500).json({ error: err.message });
     }
