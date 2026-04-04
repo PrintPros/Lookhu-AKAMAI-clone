@@ -94,15 +94,20 @@ async function handlePlaylist(request, env, ctx, corsHeaders) {
     playlist += `#EXT-X-TARGETDURATION:${segDur}\n`;
     playlist += `#EXT-X-MEDIA-SEQUENCE:${startSeq}\n`;
 
-    // Count discontinuities before the window
-    let discontinuityCount = 0;
-    let prevProgId = null;
-    for (let i = 0; i < Math.max(0, startGlobalSeq); i++) {
-      const fi = ((i % totalSegments) + totalSegments) % totalSegments;
-      const pid = allSegments[fi].program.id;
-      if (prevProgId !== null && pid !== prevProgId) discontinuityCount++;
-      prevProgId = pid;
+    // Count discontinuities mathematically — full loops plus partial
+    const fullLoops = Math.floor(Math.max(0, startGlobalSeq) / totalSegments);
+    // Count boundary crossings in one full loop
+    let discsPerLoop = 0;
+    for (let i = 1; i < totalSegments; i++) {
+      if (allSegments[i].program.id !== allSegments[i - 1].program.id) discsPerLoop++;
     }
+    // Count partial loop remainder
+    const remainder = Math.max(0, startGlobalSeq) % totalSegments;
+    let partialDiscs = 0;
+    for (let i = 1; i < remainder; i++) {
+      if (allSegments[i].program.id !== allSegments[i - 1].program.id) partialDiscs++;
+    }
+    const discontinuityCount = (fullLoops * discsPerLoop) + partialDiscs;
     playlist += `#EXT-X-DISCONTINUITY-SEQUENCE:${discontinuityCount}\n`;
 
     let lastProgram = null;
