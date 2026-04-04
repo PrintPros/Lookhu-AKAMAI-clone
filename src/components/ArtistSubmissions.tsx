@@ -131,19 +131,8 @@ export function ArtistSubmissions() {
         })
         .then(async (res) => {
           if (!res.ok) throw new Error("Transcoding failed");
-          const data = await res.json();
-          const videoId = submission.mp4Key?.split('/')[1] || mediaRef.id;
-          await updateDoc(doc(db, "media", mediaRef.id), {
-            status: "ready",
-            m3u8Url: `${configData.publicBaseUrl}/streams/${videoId}/index.m3u8`,
-            segmentCount: data.segmentCount,
-            duration: data.duration,
-            segmentDuration: 6,
-            segmentPrefix: "segment_",
-            segmentPad: 4,
-            r2Path: `streams/${videoId}`,
-            bucketName: configData.bucketName,
-          });
+          // Server handles Firestore update via Admin SDK — no client update needed
+          console.log("Transcode triggered successfully for", mediaRef.id);
         })
         .catch(async (err) => {
           console.error("Transcode trigger failed:", err);
