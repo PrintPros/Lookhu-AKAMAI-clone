@@ -694,7 +694,13 @@ export function ChannelManager({ setActiveTab, profile }: ChannelManagerProps) {
                             className="absolute top-2 right-2 h-7 px-2 text-[10px]" 
                             size="sm" 
                             onClick={() => {
-                              const code = `<iframe src="${window.location.origin}/embed/${editingChannel.id}?autoplay=${editingChannel.embedSettings?.autoPlay ?? true}&muted=${editingChannel.embedSettings?.muted ?? true}&controls=${editingChannel.embedSettings?.controls ?? true}" width="${editingChannel.embedSettings?.width || "100%"}" height="${editingChannel.embedSettings?.height || "100%"}" frameborder="0" allowfullscreen></iframe>`;
+                              const code = `<div style="position:relative;padding-bottom:56.25%;height:0;overflow:hidden;max-width:100%;">
+  <iframe 
+    src="${window.location.origin}/embed/${editingChannel.id}?autoplay=${editingChannel.embedSettings?.autoPlay ?? true}&muted=${editingChannel.embedSettings?.muted ?? true}&controls=${editingChannel.embedSettings?.controls ?? true}" 
+    style="position:absolute;top:0;left:0;width:100%;height:100%;border:0;" 
+    allowfullscreen
+  ></iframe>
+</div>`;
                               navigator.clipboard.writeText(code);
                               toast.success("Embed code copied!");
                             }}

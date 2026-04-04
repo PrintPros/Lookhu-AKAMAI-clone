@@ -294,7 +294,11 @@ export function ArtistSubmissions() {
                     >
                       <div className="aspect-video bg-black rounded-lg overflow-hidden">
                         {submission.videoFileUrl || submission.m3u8Url ? (
-                          <VideoPlayer src={submission.videoFileUrl || submission.m3u8Url || ""} />
+                          submission.videoFileUrl ? (
+                            <video src={submission.videoFileUrl} controls className="w-full h-full" />
+                          ) : (
+                            <VideoPlayer src={submission.m3u8Url || ""} />
+                          )
                         ) : (
                           <div className="w-full h-full flex flex-col items-center justify-center text-zinc-500 gap-4">
                             <Loader2 className="h-12 w-12 animate-spin" />

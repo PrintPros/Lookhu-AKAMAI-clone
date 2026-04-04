@@ -89,7 +89,7 @@ async function handlePlaylist(request, env, ctx, corsHeaders) {
 
     // Start DVR_SEGMENTS back from current position
     const startFlatIndex = ((currentFlatIndex - DVR_SEGMENTS) % totalSegments + totalSegments) % totalSegments;
-    const startSeq = globalSeq - DVR_SEGMENTS;
+    const startSeq = Math.max(0, globalSeq - DVR_SEGMENTS);
 
     let playlist = "#EXTM3U\\n";
     playlist += "#EXT-X-VERSION:3\\n";
