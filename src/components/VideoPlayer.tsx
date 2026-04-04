@@ -33,7 +33,18 @@ export function VideoPlayer({
       if (Hls.isSupported()) {
         const hls = new Hls({
           enableWorker: true,
-          backBufferLength: 60
+          backBufferLength: 60,
+          // Handle codec/audio mismatches at discontinuities
+          forceKeyFrameOnDiscontinuity: true,
+          // Allow buffer to flush and reset on append errors
+          manifestLoadingMaxRetry: 3,
+          levelLoadingMaxRetry: 3,
+          fragLoadingMaxRetry: 3,
+          // Audio track switching tolerance
+          nudgeMaxRetry: 5,
+          nudgeOffset: 0.1,
+          // Reset buffer on codec change across discontinuity
+          startFragPrefetch: false,
         });
         
         hls.loadSource(src);
@@ -48,6 +59,13 @@ export function VideoPlayer({
         });
 
         hls.on(Hls.Events.ERROR, (event, data) => {
+          // Handle non-fatal buffer append errors by flushing and recovering
+          if (data.details === "bufferAppendError" || data.details === "bufferFull") {
+            console.log("Buffer append error — flushing and recovering");
+            hls.recoverMediaError();
+            return;
+          }
+
           if (data.fatal) {
             if (onError) onError(data);
             switch (data.type) {
