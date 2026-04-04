@@ -93,7 +93,13 @@ async function handlePlaylist(request, env, ctx, corsHeaders) {
     playlist += "#EXT-X-VERSION:3\n";
     playlist += `#EXT-X-TARGETDURATION:${segDur}\n`;
     playlist += `#EXT-X-MEDIA-SEQUENCE:${startSeq}\n`;
-    playlist += `#EXT-X-DISCONTINUITY-SEQUENCE:0\n`;
+    let discontinuityCount = 0;
+    for (let i = 0; i < startFlatIndex; i++) {
+      if (i > 0 && allSegments[i].program.id !== allSegments[i-1].program.id) {
+        discontinuityCount++;
+      }
+    }
+    playlist += `#EXT-X-DISCONTINUITY-SEQUENCE:${discontinuityCount}\n`;
 
     let lastProgram = null;
     let segmentTime = now - (DVR_SEGMENTS * segDur);

@@ -75,7 +75,7 @@ function getCurrentPosition(manifest, env) {
 }
 
 async function handlePlaylist(request, env, ctx, corsHeaders) {
-  const DVR_SEGMENTS = 30;
+  const DVR_SEGMENTS = 30; // 3 minute DVR window — minimum for FAST distributors
 
   try {
     const manifest = await getManifest(env, ctx);
@@ -87,6 +87,7 @@ async function handlePlaylist(request, env, ctx, corsHeaders) {
       });
     }
 
+    // Start DVR_SEGMENTS back from current position
     const startFlatIndex = ((currentFlatIndex - DVR_SEGMENTS) % totalSegments + totalSegments) % totalSegments;
     const startSeq = globalSeq - DVR_SEGMENTS;
 
@@ -94,7 +95,13 @@ async function handlePlaylist(request, env, ctx, corsHeaders) {
     playlist += "#EXT-X-VERSION:3\\n";
     playlist += \`#EXT-X-TARGETDURATION:\${segDur}\\n\`;
     playlist += \`#EXT-X-MEDIA-SEQUENCE:\${startSeq}\\n\`;
-    playlist += \`#EXT-X-DISCONTINUITY-SEQUENCE:0\\n\`;
+    let discontinuityCount = 0;
+    for (let i = 0; i < startFlatIndex; i++) {
+      if (i > 0 && allSegments[i].program.id !== allSegments[i-1].program.id) {
+        discontinuityCount++;
+      }
+    }
+    playlist += \`#EXT-X-DISCONTINUITY-SEQUENCE:\${discontinuityCount}\\n\`;
 
     let lastProgram = null;
     let segmentTime = now - (DVR_SEGMENTS * segDur);
@@ -103,21 +110,33 @@ async function handlePlaylist(request, env, ctx, corsHeaders) {
       const flatIndex = (startFlatIndex + i) % totalSegments;
       const { program, segIndex } = allSegments[flatIndex];
 
+      // Add discontinuity and date-time at program boundaries
       if (lastProgram !== null && program.id !== lastProgram.id) {
         playlist += "#EXT-X-DISCONTINUITY\\n";
       }
 
-      playlist += \`#EXT-X-PROGRAM-DATE-TIME:\${new Date(segmentTime * 1000).toISOString()}\\n\`;
-      const segmentFilename = \`\${program.prefix}\${String(segIndex).padStart(program.pad, "0")}.ts\`;
-      playlist += \`#EXTINF:\${segDur},\\n\`;
-      playlist += \`/segments/\${program.id}/\${segmentFilename}\\n\`;
+      // EXT-X-PROGRAM-DATE-TIME required by Tubi/Pluto/Samsung
+      const dt = new Date(segmentTime * 1000).toISOString();
+      playlist += \`#EXT-X-PROGRAM-DATE-TIME:\${dt}\\n\`;
+
+      const pad = program.pad || 4;
+      const prefix = program.prefix || "segment_";
+      const segNum = segIndex.toString().padStart(pad, "0");
+
+      playlist += \`#EXTINF:\${segDur}.000,\\n\`;
+      playlist += \`/segments/\${program.id}/\${prefix}\${segNum}.ts\\n\`;
 
       lastProgram = program;
       segmentTime += segDur;
     }
 
     return new Response(playlist, {
-      headers: { ...corsHeaders, "Content-Type": "application/x-mpegURL", "Cache-Control": "public, max-age=2" }
+      headers: {
+        ...corsHeaders,
+        "Content-Type": "application/x-mpegURL",
+        "Cache-Control": "no-cache, no-store, must-revalidate",
+        "X-Channel": env.CHANNEL_SLUG,
+      }
     });
 
   } catch (err) {
