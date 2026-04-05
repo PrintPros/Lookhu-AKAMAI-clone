@@ -56,7 +56,7 @@ async function deploySchedulerWorker(params: any) {
 export function CloudflareSettings({ profile }: { profile: any }) {
   const [configs, setConfigs] = useState<CloudflareConfig[]>([]);
   const [channels, setChannels] = useState<Channel[]>([]);
-  const [loading, setLoading] = useState(true);
+  const [loading, setLoading] = useState(false);
   const [testing, setTesting] = useState(false);
   const [testResult, setTestResult] = useState<{ success: boolean; message: string } | null>(null);
 
