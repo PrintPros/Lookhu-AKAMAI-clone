@@ -278,7 +278,8 @@ service cloud.firestore {
 
     match /cloudflareConfigs/{configId} {
       allow read: if (request.auth != null && request.auth.uid == resource.data.userId)
-        || resource.data.isActive == true;
+        || resource.data.isActive == true
+        || isMasterAdmin();
       allow create: if request.auth != null
         && request.auth.uid == request.resource.data.userId && isValidCloudflareConfig(request.resource.data);
       allow update: if request.auth != null
