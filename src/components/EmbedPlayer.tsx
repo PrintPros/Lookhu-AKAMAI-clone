@@ -36,7 +36,7 @@ export function EmbedPlayer({ channelId, skin: skinProp }: EmbedPlayerProps) {
   const [isMuted, setIsMuted] = useState(true);
 
   const handlePlayPause = () => {
-    const video = document.querySelector("video");
+    const video = videoRef.current;
     if (!video) return;
     if (isPlaying) {
       video.pause();
@@ -47,7 +47,7 @@ export function EmbedPlayer({ channelId, skin: skinProp }: EmbedPlayerProps) {
   };
 
   const handleFullscreen = () => {
-    const video = document.querySelector("video");
+    const video = videoRef.current;
     if (!video) return;
     if (video.requestFullscreen) video.requestFullscreen();
   };

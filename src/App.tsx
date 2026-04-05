@@ -22,6 +22,7 @@ import { InvitationList } from "./components/InvitationList";
 import { UserProfile } from "./components/UserProfile";
 import { motion, AnimatePresence } from "framer-motion";
 import { Toaster } from "sonner";
+import { ErrorBoundary } from "./components/ErrorBoundary";
 
 export default function App() {
   const [user, setUser] = useState<any>(null);
@@ -139,13 +140,13 @@ export default function App() {
       case "submissions":
         return <ArtistSubmissions />;
       case "cloudflare":
-        return <CloudflareSettings />;
+        return <CloudflareSettings profile={profile} />;
       case "epg":
-        return <EPGViewer />;
+        return <EPGViewer profile={profile} />;
       case "ads":
         return <AdSettings />;
       case "settings":
-        return <PlatformSettings />;
+        return <PlatformSettings profile={profile} />;
       case "admin":
         return <AdminDashboard />;
       case "profile":
@@ -160,32 +161,33 @@ export default function App() {
   };
 
   return (
-    <div className="flex h-screen bg-zinc-50 overflow-hidden">
-      <Toaster position="top-right" richColors />
-      <Sidebar 
-        activeTab={activeTab} 
-        setActiveTab={setActiveTab} 
-        onLogout={handleLogout} 
-        pendingSubmissions={pendingCount}
-        pendingInvites={pendingInvites}
-        role={profile?.role}
-        accountId={profile?.accountId}
-      />
-      
-      <main className="flex-1 overflow-y-auto p-8">
-        <AnimatePresence mode="wait">
-          <motion.div
-            key={activeTab}
-            initial={{ opacity: 0, y: 10 }}
-            animate={{ opacity: 1, y: 0 }}
-            exit={{ opacity: 0, y: -10 }}
-            transition={{ duration: 0.2 }}
-            className="mx-auto max-w-7xl"
-          >
-            {renderContent()}
-          </motion.div>
-        </AnimatePresence>
-      </main>
-    </div>
+    <ErrorBoundary>
+      <div className="flex h-screen bg-zinc-50 overflow-hidden">
+        <Toaster position="top-right" richColors />
+        <Sidebar 
+          activeTab={activeTab} 
+          setActiveTab={setActiveTab} 
+          onLogout={handleLogout} 
+          pendingSubmissions={pendingCount}
+          pendingInvites={pendingInvites}
+          role={profile?.role}
+        />
+        
+        <main className="flex-1 overflow-y-auto p-8">
+          <AnimatePresence mode="wait">
+            <motion.div
+              key={activeTab}
+              initial={{ opacity: 0, y: 10 }}
+              animate={{ opacity: 1, y: 0 }}
+              exit={{ opacity: 0, y: -10 }}
+              transition={{ duration: 0.2 }}
+              className="mx-auto max-w-7xl"
+            >
+              {renderContent()}
+            </motion.div>
+          </AnimatePresence>
+        </main>
+      </div>
+    </ErrorBoundary>
   );
 }

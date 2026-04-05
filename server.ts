@@ -898,6 +898,11 @@ async function startServer() {
     }
 
     try {
+      // Fetch manifest settings
+      const manifestDoc = await dbAdmin.collection("settings").doc("manifest").get();
+      if (!manifestDoc.exists) throw new Error("Manifest settings not found");
+      const manifestSettings = manifestDoc.data();
+
       // Build manifest from data sent by browser
       const manifest = buildManifest(channel, playlist, mediaItems || [], [cfConfig]);
       const validation = validateManifest(manifest);
@@ -907,15 +912,15 @@ async function startServer() {
 
       // Push manifest to R2
       const r2 = createR2Client(
-        cfConfig.accountId,
-        cfConfig.r2AccessKeyId,
-        cfConfig.r2SecretAccessKey
+        manifestSettings.accountId,
+        manifestSettings.r2AccessKeyId,
+        manifestSettings.r2SecretAccessKey
       );
       const channelSlug = slugify(channel.name);
       const manifestKey = `channels/${channelSlug}/manifest.json`;
 
       await r2.send(new PutObjectCommand({
-        Bucket: cfConfig.bucketName,
+        Bucket: manifestSettings.bucketName,
         Key: manifestKey,
         Body: JSON.stringify(manifest, null, 2),
         ContentType: "application/json",
@@ -929,7 +934,7 @@ async function startServer() {
         accountId: cfConfig.accountId,
         cfApiToken: cfConfig.cfApiToken || cfConfig.apiToken,
         channelSlug,
-        manifestBucketUrl: cfConfig.publicBaseUrl,
+        manifestBucketUrl: manifestSettings.publicBaseUrl,
         epoch,
       });
 
@@ -949,7 +954,7 @@ async function startServer() {
       res.json({
         success: true,
         workerUrl: deployResult.workerUrl,
-        manifestUrl: `${cfConfig.publicBaseUrl}/${manifestKey}`,
+        manifestUrl: `${manifestSettings.publicBaseUrl}/${manifestKey}`,
       });
 
     } catch (err: any) {

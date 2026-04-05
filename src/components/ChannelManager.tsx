@@ -618,7 +618,7 @@ export function ChannelManager({ setActiveTab, profile }: ChannelManagerProps) {
 
             {activeSettingsTab === "epg" && editingChannel && (
               <div className="py-2">
-                <EPGViewer channelId={editingChannel.id} />
+                <EPGViewer channelId={editingChannel.id} profile={profile} />
               </div>
             )}
 

@@ -60,7 +60,7 @@ export function VideoPlayer({
 
         hls.on(Hls.Events.ERROR, (event, data) => {
           // Handle buffer append errors by doing a full source reload
-          if (data.details === "bufferAppendError" || data.details === "bufferFull") {
+          if (data.details === Hls.ErrorDetails.BUFFER_APPEND_ERROR || data.details === Hls.ErrorDetails.BUFFER_FULL_ERROR) {
             console.log("Buffer append error — reloading source");
             const currentSrc = src;
             hls.destroy();

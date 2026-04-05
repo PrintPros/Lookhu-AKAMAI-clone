@@ -53,7 +53,7 @@ async function deploySchedulerWorker(params: any) {
   return response.json();
 }
 
-export function CloudflareSettings() {
+export function CloudflareSettings({ profile }: { profile: any }) {
   const [configs, setConfigs] = useState<CloudflareConfig[]>([]);
   const [channels, setChannels] = useState<Channel[]>([]);
   const [loading, setLoading] = useState(true);
@@ -109,13 +109,16 @@ export function CloudflareSettings() {
   }
 
   useEffect(() => {
-    if (!auth.currentUser) return;
+    if (!auth.currentUser || !profile) return;
+
+    const isMaster = profile.role === "master_admin";
+    const targetUserId = isMaster ? null : (profile.ownerUserId || auth.currentUser.uid);
 
     // Listen to configs
-    const qConfigs = query(
-      collection(db, "cloudflareConfigs"),
-      where("userId", "==", auth.currentUser.uid)
-    );
+    let qConfigs = query(collection(db, "cloudflareConfigs"));
+    if (targetUserId) {
+      qConfigs = query(qConfigs, where("userId", "==", targetUserId));
+    }
 
     const unsubConfigs = onSnapshot(qConfigs, (snapshot) => {
       const data = snapshot.docs.map((doc) => ({
@@ -130,10 +133,10 @@ export function CloudflareSettings() {
     });
 
     // Listen to channels
-    const qChannels = query(
-      collection(db, "channels"),
-      where("userId", "==", auth.currentUser.uid)
-    );
+    let qChannels = query(collection(db, "channels"));
+    if (targetUserId) {
+      qChannels = query(qChannels, where("userId", "==", targetUserId));
+    }
 
     const unsubChannels = onSnapshot(qChannels, (snapshot) => {
       const data = snapshot.docs.map((doc) => ({
@@ -149,7 +152,7 @@ export function CloudflareSettings() {
       unsubConfigs();
       unsubChannels();
     };
-  }, []);
+  }, [profile]);
 
   const handleTestConnection = async () => {
     setTesting(true);

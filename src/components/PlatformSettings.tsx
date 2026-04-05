@@ -1,17 +1,54 @@
-import React, { useState } from "react";
-import { Server, Database, Shield, HardDrive, Activity, RefreshCw } from "lucide-react";
+import React, { useState, useEffect } from "react";
+import { Server, Database, Shield, HardDrive, Activity, RefreshCw, FileJson } from "lucide-react";
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from "./ui/Card";
 import { Button } from "./ui/Button";
 import { Badge } from "./ui/Badge";
+import { Input } from "./ui/Input";
 import { cn } from "../lib/utils";
 import { CloudflareSettings } from "./CloudflareSettings";
 import { AdSettings } from "./AdSettings";
+import { db } from "../firebase";
+import { doc, getDoc, setDoc } from "firebase/firestore";
+import { toast } from "sonner";
 
-interface PlatformSettingsProps {}
+interface PlatformSettingsProps {
+  profile: any;
+}
 
-export function PlatformSettings({}: PlatformSettingsProps) {
+export function PlatformSettings({ profile }: PlatformSettingsProps) {
   const [storageUsage] = useState({ used: 4.5, total: 10 });
   const [isRefreshing, setIsRefreshing] = useState(false);
+  const [manifestSettings, setManifestSettings] = useState({
+    accountId: "",
+    r2AccessKeyId: "",
+    r2SecretAccessKey: "",
+    bucketName: "",
+    publicBaseUrl: "",
+  });
+  const [savingManifest, setSavingManifest] = useState(false);
+
+  useEffect(() => {
+    const fetchManifest = async () => {
+      const docRef = doc(db, "settings", "manifest");
+      const docSnap = await getDoc(docRef);
+      if (docSnap.exists()) {
+        setManifestSettings(docSnap.data() as any);
+      }
+    };
+    fetchManifest();
+  }, []);
+
+  const handleSaveManifest = async () => {
+    setSavingManifest(true);
+    try {
+      await setDoc(doc(db, "settings", "manifest"), manifestSettings);
+      toast.success("Manifest settings saved");
+    } catch (error) {
+      toast.error("Failed to save manifest settings");
+    } finally {
+      setSavingManifest(false);
+    }
+  };
 
   const handleRefresh = () => {
     setIsRefreshing(true);
@@ -93,9 +130,46 @@ export function PlatformSettings({}: PlatformSettingsProps) {
             </div>
           </CardContent>
         </Card>
+
+        <Card className="md:col-span-2">
+          <CardHeader>
+            <div className="flex items-center gap-2">
+              <FileJson className="h-5 w-5 text-zinc-400" />
+              <CardTitle>Manifest Storage</CardTitle>
+            </div>
+            <CardDescription>Configure credentials for storing the global manifest.json.</CardDescription>
+          </CardHeader>
+          <CardContent className="space-y-4">
+            <div className="grid gap-4 md:grid-cols-2">
+              <div className="space-y-2">
+                <label className="text-sm font-medium">Account ID</label>
+                <Input value={manifestSettings.accountId} onChange={(e) => setManifestSettings({...manifestSettings, accountId: e.target.value})} />
+              </div>
+              <div className="space-y-2">
+                <label className="text-sm font-medium">Bucket Name</label>
+                <Input value={manifestSettings.bucketName} onChange={(e) => setManifestSettings({...manifestSettings, bucketName: e.target.value})} />
+              </div>
+              <div className="space-y-2">
+                <label className="text-sm font-medium">Public Base URL</label>
+                <Input value={manifestSettings.publicBaseUrl} onChange={(e) => setManifestSettings({...manifestSettings, publicBaseUrl: e.target.value})} />
+              </div>
+              <div className="space-y-2">
+                <label className="text-sm font-medium">R2 Access Key ID</label>
+                <Input value={manifestSettings.r2AccessKeyId} onChange={(e) => setManifestSettings({...manifestSettings, r2AccessKeyId: e.target.value})} />
+              </div>
+              <div className="space-y-2">
+                <label className="text-sm font-medium">R2 Secret Access Key</label>
+                <Input type="password" value={manifestSettings.r2SecretAccessKey} onChange={(e) => setManifestSettings({...manifestSettings, r2SecretAccessKey: e.target.value})} />
+              </div>
+            </div>
+            <Button onClick={handleSaveManifest} disabled={savingManifest}>
+              {savingManifest ? "Saving..." : "Save Manifest Settings"}
+            </Button>
+          </CardContent>
+        </Card>
       </div>
 
-      <CloudflareSettings />
+      <CloudflareSettings profile={profile} />
       <AdSettings />
     </div>
   );

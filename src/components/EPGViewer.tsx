@@ -1,5 +1,5 @@
 import React, { useState, useEffect, useMemo } from "react";
-import { db } from "../firebase";
+import { auth, db } from "../firebase";
 import { toast } from "sonner";
 import { 
   collection, 
@@ -34,11 +34,12 @@ import { cn } from "../lib/utils";
 interface EPGViewerProps {
   channelId?: string;
   epgData?: EPGEntry[];
+  profile: any;
 }
 
 const EPOCH = 1704067200; // Jan 1 2024 00:00:00 UTC
 
-export function EPGViewer({ channelId, epgData: externalEpg }: EPGViewerProps) {
+export function EPGViewer({ channelId, epgData: externalEpg, profile }: EPGViewerProps) {
   const [channels, setChannels] = useState<Channel[]>([]);
   const [selectedChannelId, setSelectedChannelId] = useState<string | null>(channelId || null);
   const [channel, setChannel] = useState<Channel | null>(null);
@@ -68,7 +69,22 @@ export function EPGViewer({ channelId, epgData: externalEpg }: EPGViewerProps) {
 
   // Fetch all channels, playlists, and media for high-level view
   useEffect(() => {
-    const unsubChannels = onSnapshot(collection(db, "channels"), (snap) => {
+    if (!auth.currentUser || !profile) return;
+
+    const isMaster = profile.role === "master_admin";
+    const targetUserId = isMaster ? null : (profile.ownerUserId || auth.currentUser.uid);
+
+    let channelsQ = query(collection(db, "channels"));
+    let playlistsQ = query(collection(db, "playlists"));
+    let mediaQ = query(collection(db, "media"));
+
+    if (targetUserId) {
+      channelsQ = query(channelsQ, where("userId", "==", targetUserId));
+      playlistsQ = query(playlistsQ, where("userId", "==", targetUserId));
+      mediaQ = query(mediaQ, where("userId", "==", targetUserId));
+    }
+
+    const unsubChannels = onSnapshot(channelsQ, (snap) => {
       setChannels(snap.docs.map(d => ({ id: d.id, ...d.data() } as Channel)));
       setChannelsLoading(false);
     }, (error) => {
@@ -76,11 +92,11 @@ export function EPGViewer({ channelId, epgData: externalEpg }: EPGViewerProps) {
       setChannelsLoading(false);
     });
 
-    const unsubPlaylists = onSnapshot(collection(db, "playlists"), (snap) => {
+    const unsubPlaylists = onSnapshot(playlistsQ, (snap) => {
       setPlaylists(snap.docs.map(d => ({ id: d.id, ...d.data() } as Playlist)));
     });
 
-    const unsubMedia = onSnapshot(collection(db, "media"), (snap) => {
+    const unsubMedia = onSnapshot(mediaQ, (snap) => {
       setAllMedia(snap.docs.map(d => ({ id: d.id, ...d.data() } as Media)));
     });
 
@@ -89,7 +105,7 @@ export function EPGViewer({ channelId, epgData: externalEpg }: EPGViewerProps) {
       unsubPlaylists();
       unsubMedia();
     };
-  }, []);
+  }, [profile]);
 
   useEffect(() => {
     if (!selectedChannelId) {
