@@ -36,6 +36,9 @@ export default function App() {
   const isEmbed = window.location.pathname.startsWith("/embed/");
   const embedId = isEmbed ? window.location.pathname.split("/")[2] : null;
   const isSubmitPortal = window.location.pathname === "/submit";
+  const embedParams = new URLSearchParams(window.location.search);
+  const embedIdFromParam = embedParams.get("id");
+  const isEmbedParam = !!embedIdFromParam && window.location.pathname === "/";
 
   useEffect(() => {
     const unsubscribe = onAuthStateChanged(auth, async (u) => {
@@ -113,10 +116,10 @@ export default function App() {
     return <ArtistPortal />;
   }
 
-  if (isEmbed && embedId) {
+  if ((isEmbed && embedId) || isEmbedParam) {
     return (
       <div className="w-screen h-screen bg-black overflow-hidden">
-        <EmbedPlayer channelId={embedId} />
+        <EmbedPlayer channelId={embedId || embedIdFromParam!} />
       </div>
     );
   }
