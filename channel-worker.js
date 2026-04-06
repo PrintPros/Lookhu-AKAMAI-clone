@@ -276,7 +276,7 @@ async function handleSegment(request, env, ctx, corsHeaders) {
     }
 
     const programId = parts[0];
-    const fileName = parts[1];
+    const fileName = parts[1].split("?")[0]; // strip query params
 
     const program = manifest.programs.find(p => p.id === programId);
     if (!program) {
