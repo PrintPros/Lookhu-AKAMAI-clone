@@ -890,6 +890,49 @@ async function startServer() {
     }
   });
 
+  async function deployEmbedPlayer(accountId: string, cfApiToken: string) {
+    const htmlPath = path.join(process.cwd(), "src/embed/index.html");
+    const htmlContent = fs.readFileSync(htmlPath, "utf-8");
+
+    // 1. Create project if not exists
+    const projectUrl = `https://api.cloudflare.com/client/v4/accounts/${accountId}/pages/projects`;
+    await fetch(projectUrl, {
+      method: "POST",
+      headers: { "Authorization": `Bearer ${cfApiToken}`, "Content-Type": "application/json" },
+      body: JSON.stringify({ name: "fastfasts-embed", production_branch: "main" })
+    });
+
+    // 2. Upload deployment
+    const uploadUrl = `https://api.cloudflare.com/client/v4/accounts/${accountId}/pages/projects/fastfasts-embed/deployments`;
+    
+    const formData = new FormData();
+    formData.append("index.html", new Blob([htmlContent], { type: "text/html" }));
+
+    const uploadRes = await fetch(uploadUrl, {
+      method: "POST",
+      headers: { "Authorization": `Bearer ${cfApiToken}` },
+      body: formData
+    });
+
+    const uploadResult = await uploadRes.json();
+    if (!uploadResult.success) throw new Error(JSON.stringify(uploadResult.errors));
+
+    return "https://fastfasts-embed.pages.dev";
+  }
+
+  app.post("/api/deploy/embed-player", async (req, res) => {
+    const { accountId, cfApiToken } = req.body;
+    if (!accountId || !cfApiToken) return res.status(400).json({ error: "Missing Cloudflare credentials" });
+
+    try {
+      const url = await deployEmbedPlayer(accountId, cfApiToken);
+      res.json({ success: true, url });
+    } catch (err: any) {
+      console.error("Embed deploy error:", err);
+      res.status(500).json({ error: err.message });
+    }
+  });
+
   app.post("/api/publish/now", async (req, res) => {
     const authHeader = req.headers.authorization;
     if (!authHeader?.startsWith("Bearer ")) {
@@ -948,6 +991,18 @@ async function startServer() {
       });
 
       if (!deployResult.success) throw new Error(deployResult.error);
+
+      // Deploy embed player to Cloudflare Pages (creates once, skips if already deployed)
+      const embedSettingsSnap = await dbAdmin.collection("settings").doc("embedPlayer").get();
+      const embedSettings = embedSettingsSnap.exists ? embedSettingsSnap.data() : null;
+      if (!embedSettings?.pagesUrl) {
+        try {
+          const pagesUrl = await deployEmbedPlayer(cfConfig.accountId, cfConfig.cfApiToken || cfConfig.apiToken);
+          await dbAdmin.collection("settings").doc("embedPlayer").set({ pagesUrl });
+        } catch (err) {
+          console.error("Embed deploy failed:", err);
+        }
+      }
 
       // Update channel with worker URL and epoch
       if (dbAdmin) {

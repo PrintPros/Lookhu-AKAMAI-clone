@@ -1,0 +1,55 @@
+<!DOCTYPE html>
+<html>
+<head>
+  <title>Embed Player</title>
+  <style>
+    body { margin: 0; background: #000; color: #fff; font-family: sans-serif; overflow: hidden; }
+    #video { width: 100vw; height: 100vh; object-fit: contain; }
+    #overlay { position: absolute; bottom: 20px; left: 20px; background: rgba(0,0,0,0.5); padding: 10px; }
+  </style>
+</head>
+<body>
+  <video id="video" autoplay muted playsinline></video>
+  <div id="overlay">
+    <h1 id="channelName" style="margin:0; font-size: 18px;"></h1>
+    <p id="nowPlaying" style="margin:0; font-size: 14px;"></p>
+  </div>
+  <script src="https://www.gstatic.com/firebasejs/10.7.1/firebase-app-compat.js"></script>
+  <script src="https://www.gstatic.com/firebasejs/10.7.1/firebase-firestore-compat.js"></script>
+  <script src="https://cdn.jsdelivr.net/npm/hls.js@latest"></script>
+  <script>
+    const firebaseConfig = {
+      apiKey: "AIzaSyBTEA9-Ipr_K1EfWG8GL0WxFcFzhBMQaes",
+      projectId: "ai-studio-applet-webapp-c9661",
+      databaseId: "ai-studio-ae1d4714-8663-47e0-b5d5-08af1242e645"
+    };
+    firebase.initializeApp(firebaseConfig);
+    const db = firebase.firestore();
+    
+    const params = new URLSearchParams(window.location.search);
+    const channelId = params.get('id');
+    
+    if (channelId) {
+      db.collection('channels').doc(channelId).get().then(doc => {
+        if (doc.exists) {
+          const data = doc.data();
+          document.getElementById('channelName').innerText = data.name;
+          const video = document.getElementById('video');
+          if (Hls.isSupported()) {
+            const hls = new Hls();
+            hls.loadSource(data.workerManifestUrl);
+            hls.attachMedia(video);
+            hls.on(Hls.Events.MANIFEST_PARSED, () => video.play());
+          }
+        }
+      });
+      
+      fetch('/now.json?id=' + channelId)
+        .then(r => r.json())
+        .then(data => {
+          document.getElementById('nowPlaying').innerText = 'Now Playing: ' + data.title;
+        });
+    }
+  </script>
+</body>
+</html>
