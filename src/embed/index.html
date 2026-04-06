@@ -44,7 +44,7 @@
         }
       });
       
-      fetch('/now.json?id=' + channelId)
+      fetch(data.workerManifestUrl.replace('/live.m3u8', '') + '/now.json')
         .then(r => r.json())
         .then(data => {
           document.getElementById('nowPlaying').innerText = 'Now Playing: ' + data.title;
