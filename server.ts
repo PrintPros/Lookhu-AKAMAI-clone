@@ -891,38 +891,42 @@ async function startServer() {
   });
 
   async function deployEmbedPlayer(accountId: string, cfApiToken: string) {
-    const htmlPath = path.join(process.cwd(), "src/embed/index.html");
-    const htmlContent = fs.readFileSync(htmlPath, "utf-8");
+  const htmlPath = path.join(process.cwd(), "src/embed/index.html");
+  const htmlContent = fs.readFileSync(htmlPath, "utf-8");
 
-    // 1. Create project if not exists
-    const projectUrl = `https://api.cloudflare.com/client/v4/accounts/${accountId}/pages/projects`;
-    await fetch(projectUrl, {
-      method: "POST",
-      headers: { "Authorization": `Bearer ${cfApiToken}`, "Content-Type": "application/json" },
-      body: JSON.stringify({ name: "fastfasts-embed", production_branch: "main" })
+  const workerScript = `
+export default {
+  async fetch(request) {
+    const url = new URL(request.url);
+    return new Response(${JSON.stringify(htmlContent)}, {
+      headers: {
+        "Content-Type": "text/html",
+        "X-Frame-Options": "ALLOWALL",
+        "Access-Control-Allow-Origin": "*",
+      }
     });
-
-    // 2. Upload deployment with both files
-    const uploadUrl = `https://api.cloudflare.com/client/v4/accounts/${accountId}/pages/projects/fastfasts-embed/deployments`;
-    
-    const formData = new FormData();
-    formData.append("index.html", new Blob([htmlContent], { type: "text/html" }), "index.html");
-    
-    const headersPath = path.join(process.cwd(), "src/embed/_headers");
-    const headersContent = fs.readFileSync(headersPath, "utf-8");
-    formData.append("_headers", new Blob([headersContent], { type: "text/plain" }), "_headers");
-
-    const uploadRes = await fetch(uploadUrl, {
-      method: "POST",
-      headers: { "Authorization": `Bearer ${cfApiToken}` },
-      body: formData
-    });
-
-    const uploadResult = await uploadRes.json();
-    if (!uploadResult.success) throw new Error(JSON.stringify(uploadResult.errors));
-
-    return "https://fastfasts-embed.pages.dev";
   }
+};`;
+
+  const formData = new FormData();
+  formData.append("metadata", JSON.stringify({ main_module: "index.js" }));
+  formData.append("script", new Blob([workerScript], { type: "application/javascript+module" }), "index.js");
+
+  const response = await fetch(
+    `https://api.cloudflare.com/client/v4/accounts/${accountId}/workers/scripts/fastfasts-embed`,
+    { method: "PUT", headers: { "Authorization": `Bearer ${cfApiToken}` }, body: formData }
+  );
+  const result = await response.json() as any;
+  if (!result.success) throw new Error(JSON.stringify(result.errors));
+
+  // Enable workers.dev subdomain
+  await fetch(
+    `https://api.cloudflare.com/client/v4/accounts/${accountId}/workers/scripts/fastfasts-embed/subdomain`,
+    { method: "POST", headers: { "Authorization": `Bearer ${cfApiToken}`, "Content-Type": "application/json" }, body: JSON.stringify({ enabled: true }) }
+  );
+
+  return `https://fastfasts-embed.lookhu.workers.dev`;
+}
 
   app.post("/api/deploy/embed-player", async (req, res) => {
     const { accountId, cfApiToken } = req.body;

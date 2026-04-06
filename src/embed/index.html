@@ -21,10 +21,10 @@
     const firebaseConfig = {
       apiKey: "AIzaSyBTEA9-Ipr_K1EfWG8GL0WxFcFzhBMQaes",
       projectId: "ai-studio-applet-webapp-c9661",
-      databaseId: "ai-studio-ae1d4714-8663-47e0-b5d5-08af1242e645"
     };
     firebase.initializeApp(firebaseConfig);
     const db = firebase.firestore();
+    db.settings({ databaseId: "ai-studio-ae1d4714-8663-47e0-b5d5-08af1242e645" });
     
     const params = new URLSearchParams(window.location.search);
     const channelId = params.get('id');
@@ -40,15 +40,16 @@
             hls.loadSource(data.workerManifestUrl);
             hls.attachMedia(video);
             hls.on(Hls.Events.MANIFEST_PARSED, () => video.play());
+            
+            // now.json fetch must be INSIDE this block
+            fetch(data.workerManifestUrl.replace('/live.m3u8', '') + '/now.json')
+              .then(r => r.json())
+              .then(nowData => {
+                document.getElementById('nowPlaying').innerText = 'Now Playing: ' + nowData.title;
+              });
           }
         }
       });
-      
-      fetch(data.workerManifestUrl.replace('/live.m3u8', '') + '/now.json')
-        .then(r => r.json())
-        .then(data => {
-          document.getElementById('nowPlaying').innerText = 'Now Playing: ' + data.title;
-        });
     }
   </script>
 </body>
