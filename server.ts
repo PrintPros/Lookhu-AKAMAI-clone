@@ -918,13 +918,16 @@ export default {
     { method: "PUT", headers: { "Authorization": `Bearer ${cfApiToken}` }, body: formData }
   );
   const result = await response.json() as any;
+  console.log("Worker upload result:", JSON.stringify(result));
   if (!result.success) throw new Error(JSON.stringify(result.errors));
 
   // Enable workers.dev subdomain
-  await fetch(
+  const subRes = await fetch(
     `https://api.cloudflare.com/client/v4/accounts/${accountId}/workers/scripts/fastfasts-embed/subdomain`,
     { method: "POST", headers: { "Authorization": `Bearer ${cfApiToken}`, "Content-Type": "application/json" }, body: JSON.stringify({ enabled: true }) }
   );
+  const subResult = await subRes.json() as any;
+  console.log("Subdomain enable result:", JSON.stringify(subResult));
 
   return `https://fastfasts-embed.lookhu.workers.dev`;
 }
