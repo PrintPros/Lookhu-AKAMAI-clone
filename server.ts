@@ -902,8 +902,7 @@ export default {
     return new Response(${JSON.stringify(htmlContent)}, {
       headers: {
         "Content-Type": "text/html",
-        "Content-Security-Policy": "frame-ancestors *",
-        "X-Frame-Options": "ALLOWALL",
+        "Content-Security-Policy": "frame-ancestors *;",
         "Access-Control-Allow-Origin": "*",
       }
     });
@@ -1005,16 +1004,12 @@ export default {
 
       if (!deployResult.success) throw new Error(deployResult.error);
 
-      // Deploy embed player to Cloudflare Pages (creates once, skips if already deployed)
-      const embedSettingsSnap = await dbAdmin.collection("settings").doc("embedPlayer").get();
-      const embedSettings = embedSettingsSnap.exists ? embedSettingsSnap.data() : null;
-      if (!embedSettings?.pagesUrl) {
-        try {
-          const pagesUrl = await deployEmbedPlayer(cfConfig.accountId, cfConfig.cfApiToken || cfConfig.apiToken);
-          await dbAdmin.collection("settings").doc("embedPlayer").set({ pagesUrl });
-        } catch (err) {
-          console.error("Embed deploy failed:", err);
-        }
+      // Deploy embed player to Cloudflare Workers
+      try {
+        const pagesUrl = await deployEmbedPlayer(cfConfig.accountId, cfConfig.cfApiToken || cfConfig.apiToken);
+        await dbAdmin.collection("settings").doc("embedPlayer").set({ pagesUrl });
+      } catch (err) {
+        console.error("Embed deploy failed:", err);
       }
 
       // Update channel with worker URL and epoch

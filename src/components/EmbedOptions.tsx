@@ -90,7 +90,7 @@ export function EmbedOptions({ profile }: EmbedOptionsProps) {
 
   const embedCode = `<div style="position:relative;padding-bottom:56.25%;height:0;overflow:hidden;max-width:100%;">
   <iframe 
-    src="https://fastfasts-embed-worker.lookhu.workers.dev/?id=${selectedChannelId}&skin=${selectedSkin}&autoplay=${settings.autoPlay ?? true}&muted=${settings.muted ?? true}&controls=${settings.controls ?? true}" 
+    src="https://fastfasts-embed-worker.lookhu.workers.dev/?worker=${encodeURIComponent((selectedChannel?.workerManifestUrl || '').replace('/index.m3u8', '').replace('/live.m3u8', ''))}&name=${encodeURIComponent(selectedChannel?.name || 'FastFasts')}&skin=${selectedSkin}&autoplay=${settings.autoPlay ?? true}&muted=${settings.muted ?? true}&controls=${settings.controls ?? true}" 
     style="position:absolute;top:0;left:0;width:100%;height:100%;border:0;" 
     allowfullscreen
   ></iframe>
