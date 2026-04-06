@@ -115,7 +115,6 @@ async function handlePlaylist(request, env, ctx, corsHeaders) {
     playlist += `#EXT-X-DISCONTINUITY-SEQUENCE:${discontinuityCount}\n`;
 
     let lastProgram = null;
-    let segmentTime = now - (DVR_SEGMENTS * segDur);
 
     for (let i = 0; i < DVR_SEGMENTS; i++) {
       const seq = startGlobalSeq + i;
@@ -127,10 +126,6 @@ async function handlePlaylist(request, env, ctx, corsHeaders) {
         playlist += "#EXT-X-DISCONTINUITY\n";
       }
 
-      // EXT-X-PROGRAM-DATE-TIME required by Tubi/Pluto/Samsung
-      const dt = new Date(segmentTime * 1000).toISOString();
-      playlist += `#EXT-X-PROGRAM-DATE-TIME:${dt}\n`;
-
       const pad = program.pad || 4;
       const prefix = program.prefix || "segment_";
       const segNum = segIndex.toString().padStart(pad, "0");
@@ -139,7 +134,6 @@ async function handlePlaylist(request, env, ctx, corsHeaders) {
       playlist += `/segments/${program.id}/${prefix}${segNum}.ts\n`;
 
       lastProgram = program;
-      segmentTime += segDur;
     }
 
     return new Response(playlist, {

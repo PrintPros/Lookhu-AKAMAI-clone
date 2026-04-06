@@ -669,6 +669,7 @@ async function startServer() {
             "-b:a 128k",
             "-af aresample=async=1:first_pts=0",
             "-vf scale=-2:720",
+            "-force_key_frames expr:gte(t,n_forced*6)",
             "-crf 23",
             "-preset fast",
             "-hls_time 6",
