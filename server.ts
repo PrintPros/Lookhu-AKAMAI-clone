@@ -902,11 +902,15 @@ async function startServer() {
       body: JSON.stringify({ name: "fastfasts-embed", production_branch: "main" })
     });
 
-    // 2. Upload deployment
+    // 2. Upload deployment with both files
     const uploadUrl = `https://api.cloudflare.com/client/v4/accounts/${accountId}/pages/projects/fastfasts-embed/deployments`;
     
     const formData = new FormData();
-    formData.append("index.html", new Blob([htmlContent], { type: "text/html" }));
+    formData.append("index.html", new Blob([htmlContent], { type: "text/html" }), "index.html");
+    
+    const headersPath = path.join(process.cwd(), "src/embed/_headers");
+    const headersContent = fs.readFileSync(headersPath, "utf-8");
+    formData.append("_headers", new Blob([headersContent], { type: "text/plain" }), "_headers");
 
     const uploadRes = await fetch(uploadUrl, {
       method: "POST",
