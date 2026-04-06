@@ -4,7 +4,7 @@ import { Card, CardContent, CardHeader, CardTitle, CardDescription, CardFooter }
 import { Button } from "./ui/Button";
 import { Input } from "./ui/Input";
 import { Channel, Playlist, Media } from "../types";
-import { collection, query, where, onSnapshot, doc } from "firebase/firestore";
+import { collection, query, where, onSnapshot } from "firebase/firestore";
 import { db, auth } from "../firebase";
 import { Badge } from "./ui/Badge";
 
@@ -22,16 +22,6 @@ export function EmbedOptions({ profile }: EmbedOptionsProps) {
   const [selectedChannelId, setSelectedChannelId] = useState<string>("");
   const [selectedSkin, setSelectedSkin] = useState<"default" | "v1">("default");
   const [copied, setCopied] = useState(false);
-  const [pagesUrl, setPagesUrl] = useState<string | null>(null);
-
-  useEffect(() => {
-    const unsub = onSnapshot(doc(db, "settings", "embedPlayer"), (doc) => {
-      if (doc.exists()) {
-        setPagesUrl(doc.data().pagesUrl);
-      }
-    });
-    return () => unsub();
-  }, []);
 
   useEffect(() => {
     if (!auth.currentUser || !profile) return;
@@ -100,7 +90,7 @@ export function EmbedOptions({ profile }: EmbedOptionsProps) {
 
   const embedCode = `<div style="position:relative;padding-bottom:56.25%;height:0;overflow:hidden;max-width:100%;">
   <iframe 
-    src="${pagesUrl || publicOrigin}/?id=${selectedChannelId}&skin=${selectedSkin}&autoplay=${settings.autoPlay ?? true}&muted=${settings.muted ?? true}&controls=${settings.controls ?? true}" 
+    src="https://fastfasts-embed.pages.dev/?id=${selectedChannelId}&skin=${selectedSkin}&autoplay=${settings.autoPlay ?? true}&muted=${settings.muted ?? true}&controls=${settings.controls ?? true}" 
     style="position:absolute;top:0;left:0;width:100%;height:100%;border:0;" 
     allowfullscreen
   ></iframe>

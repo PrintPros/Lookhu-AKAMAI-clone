@@ -38,20 +38,10 @@ export function ChannelManager({ setActiveTab, profile }: ChannelManagerProps) {
   const [copiedId, setCopiedId] = useState<string | null>(null);
   const [cloudflareConfigs, setCloudflareConfigs] = useState<any[]>([]);
   const [publishing, setPublishing] = useState<string | null>(null);
-  const [pagesUrl, setPagesUrl] = useState<string | null>(null);
 
   // Scheduling state
   const [schedulingChannel, setSchedulingChannel] = useState<Channel | null>(null);
   const [scheduleTime, setScheduleTime] = useState("");
-
-  useEffect(() => {
-    const unsub = onSnapshot(doc(db, "settings", "embedPlayer"), (doc) => {
-      if (doc.exists()) {
-        setPagesUrl(doc.data().pagesUrl);
-      }
-    });
-    return () => unsub();
-  }, []);
 
   const handleUpdateChannel = async () => {
     if (!editingChannel || !auth.currentUser) return;
@@ -694,7 +684,7 @@ export function ChannelManager({ setActiveTab, profile }: ChannelManagerProps) {
                           <pre className="p-3 bg-zinc-900 text-zinc-100 rounded-lg text-[10px] font-mono overflow-x-auto whitespace-pre-wrap">
                             {`<div style="position:relative;padding-bottom:56.25%;height:0;overflow:hidden;max-width:100%;">
   <iframe 
-    src="${pagesUrl || window.location.origin}/?id=${editingChannel.id}&skin=v1&autoplay=${editingChannel.embedSettings?.autoPlay ?? true}&muted=${editingChannel.embedSettings?.muted ?? true}&controls=${editingChannel.embedSettings?.controls ?? true}" 
+    src="https://fastfasts-embed.pages.dev/?id=${editingChannel.id}&skin=v1&autoplay=${editingChannel.embedSettings?.autoPlay ?? true}&muted=${editingChannel.embedSettings?.muted ?? true}&controls=${editingChannel.embedSettings?.controls ?? true}" 
     style="position:absolute;top:0;left:0;width:100%;height:100%;border:0;" 
     allowfullscreen
   ></iframe>
@@ -706,7 +696,7 @@ export function ChannelManager({ setActiveTab, profile }: ChannelManagerProps) {
                             onClick={() => {
                               const code = `<div style="position:relative;padding-bottom:56.25%;height:0;overflow:hidden;max-width:100%;">
   <iframe 
-    src="${pagesUrl || window.location.origin}/?id=${editingChannel.id}&skin=v1&autoplay=${editingChannel.embedSettings?.autoPlay ?? true}&muted=${editingChannel.embedSettings?.muted ?? true}&controls=${editingChannel.embedSettings?.controls ?? true}" 
+    src="https://fastfasts-embed.pages.dev/?id=${editingChannel.id}&skin=v1&autoplay=${editingChannel.embedSettings?.autoPlay ?? true}&muted=${editingChannel.embedSettings?.muted ?? true}&controls=${editingChannel.embedSettings?.controls ?? true}" 
     style="position:absolute;top:0;left:0;width:100%;height:100%;border:0;" 
     allowfullscreen
   ></iframe>
