@@ -31,7 +31,9 @@
   <script src="https://cdn.jsdelivr.net/npm/hls.js@latest"></script>
   <script>
     const params = new URLSearchParams(window.location.search);
-    const workerUrl = params.get('worker');
+    let workerUrl = params.get('worker') || '';
+// Strip any m3u8 path that may have been included
+workerUrl = workerUrl.replace(/\/(index|live)\.m3u8$/, '');
     const channelName = params.get('name') || 'FastFasts';
     const autoplay = params.get('autoplay') !== 'false';
     const muted = params.get('muted') !== 'false';
