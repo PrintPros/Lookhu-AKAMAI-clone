@@ -16,10 +16,6 @@
     #error.show{display:flex}
     #error h2{font-size:18px;margin-bottom:8px}
     #error p{font-size:13px;opacity:.6}
-    /* Skin: v1 */
-    .skin-v1 #overlay{background:rgba(0,0,0,.7);bottom:0;left:0;right:0;padding:16px 20px;border-top:2px solid rgba(255,255,255,.1)}
-    .skin-v1 #channelName{font-size:16px;font-weight:800;letter-spacing:1px;text-transform:uppercase;color:#fff}
-    .skin-v1 #nowPlaying{font-size:13px;opacity:.7;margin-top:4px;font-style:italic}
   </style>
 </head>
 <body>
@@ -35,15 +31,11 @@
   <script src="https://cdn.jsdelivr.net/npm/hls.js@latest"></script>
   <script>
     const params = new URLSearchParams(window.location.search);
-    let workerUrl = params.get('worker') || '';
+    const workerUrl = params.get('worker');
     const channelName = params.get('name') || 'FastFasts';
     const autoplay = params.get('autoplay') !== 'false';
     const muted = params.get('muted') !== 'false';
     const controls = params.get('controls') === 'true';
-    const skin = params.get('skin') || 'default';
-
-    // Strip any trailing m3u8 path if accidentally included
-    workerUrl = workerUrl.replace(/\/(index|live)\.m3u8$/, '');
 
     const video = document.getElementById('video');
     const overlay = document.getElementById('overlay');
@@ -53,17 +45,12 @@
     video.controls = controls;
     document.getElementById('channelName').textContent = channelName;
 
-    // Apply skin
-    if (skin === 'v1') {
-      document.body.classList.add('skin-v1');
-    }
-
     if (!workerUrl) {
       errorEl.classList.add('show');
       errorEl.querySelector('p').textContent = 'No worker URL provided.';
     } else {
-      const hlsUrl = workerUrl + '/index.m3u8';
-      const nowUrl = workerUrl + '/now.json';
+      const hlsUrl = workerUrl.replace(/\/$/, '') + '/index.m3u8';
+      const nowUrl = workerUrl.replace(/\/$/, '') + '/now.json';
 
       if (Hls.isSupported()) {
         const hls = new Hls({
@@ -94,18 +81,20 @@
         errorEl.querySelector('p').textContent = 'HLS not supported in this browser.';
       }
 
+      // Fetch now playing info
       function updateNow() {
         fetch(nowUrl).then(r => r.json()).then(data => {
           const np = data.now || data;
           const artist = np.artist || np.artistName || '';
           const title = np.title || np.songTitle || '';
-          document.getElementById('nowPlaying').textContent =
-            artist && title ? artist + ' \u2014 ' + title : title || '';
+          document.getElementById('nowPlaying').textContent = 
+            artist && title ? artist + ' — ' + title : title || '';
         }).catch(() => {});
       }
       updateNow();
       setInterval(updateNow, 15000);
 
+      // Auto-hide overlay
       let hideTimer;
       function showOverlay() {
         overlay.classList.remove('hidden');
