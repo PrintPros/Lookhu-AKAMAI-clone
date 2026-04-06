@@ -902,6 +902,7 @@ export default {
     return new Response(${JSON.stringify(htmlContent)}, {
       headers: {
         "Content-Type": "text/html",
+        "Content-Security-Policy": "frame-ancestors *",
         "X-Frame-Options": "ALLOWALL",
         "Access-Control-Allow-Origin": "*",
       }
@@ -914,7 +915,7 @@ export default {
   formData.append("script", new Blob([workerScript], { type: "application/javascript+module" }), "index.js");
 
   const response = await fetch(
-    `https://api.cloudflare.com/client/v4/accounts/${accountId}/workers/scripts/fastfasts-embed`,
+    `https://api.cloudflare.com/client/v4/accounts/${accountId}/workers/scripts/fastfasts-embed-worker`,
     { method: "PUT", headers: { "Authorization": `Bearer ${cfApiToken}` }, body: formData }
   );
   const result = await response.json() as any;
@@ -923,13 +924,13 @@ export default {
 
   // Enable workers.dev subdomain
   const subRes = await fetch(
-    `https://api.cloudflare.com/client/v4/accounts/${accountId}/workers/scripts/fastfasts-embed/subdomain`,
+    `https://api.cloudflare.com/client/v4/accounts/${accountId}/workers/scripts/fastfasts-embed-worker/subdomain`,
     { method: "POST", headers: { "Authorization": `Bearer ${cfApiToken}`, "Content-Type": "application/json" }, body: JSON.stringify({ enabled: true }) }
   );
   const subResult = await subRes.json() as any;
   console.log("Subdomain enable result:", JSON.stringify(subResult));
 
-  return `https://fastfasts-embed.lookhu.workers.dev`;
+  return `https://fastfasts-embed-worker.lookhu.workers.dev`;
 }
 
   app.post("/api/deploy/embed-player", async (req, res) => {
