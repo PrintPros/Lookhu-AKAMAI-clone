@@ -67,11 +67,22 @@ workerUrl = workerUrl.replace(/\/(index|live)\.m3u8$/, '');
         });
         hls.on(Hls.Events.ERROR, (e, data) => {
           if (data.fatal) {
-            errorEl.classList.add('show');
             if (data.type === Hls.ErrorTypes.NETWORK_ERROR) {
-              setTimeout(() => hls.startLoad(), 5000);
+              // Recoverable — try to resume without showing error
+              setTimeout(() => hls.startLoad(), 3000);
+            } else if (data.type === Hls.ErrorTypes.MEDIA_ERROR) {
+              // Recoverable — let HLS.js try to fix the media
+              hls.recoverMediaError();
+            } else {
+              // Truly unrecoverable
+              errorEl.classList.add('show');
             }
           }
+        });
+
+        // Hide error overlay as soon as a fragment successfully loads
+        hls.on(Hls.Events.FRAG_LOADED, () => {
+          errorEl.classList.remove('show');
         });
       } else if (video.canPlayType('application/vnd.apple.mpegurl')) {
         video.src = hlsUrl;
