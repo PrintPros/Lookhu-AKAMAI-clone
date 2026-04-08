@@ -608,6 +608,7 @@ async function startServer() {
       return res.status(401).json({ error: "Unauthorized" });
     }
 
+    // Basic token presence check — Firebase client handles actual auth
     const idToken = authHeader.split("Bearer ")[1];
     if (!idToken || idToken.length < 20) {
       return res.status(401).json({ error: "Invalid token" });
@@ -620,16 +621,6 @@ async function startServer() {
       return res.status(400).json({ error: "Missing required fields" });
     }
 
-    // ─── Respond IMMEDIATELY so nginx / Cloud Run / browser don't time out ───
-    // The client watches Firestore via onSnapshot for status changes.
-    res.json({
-      success: true,
-      accepted: true,
-      mediaId: mediaId || null,
-      message: "Transcoding started in background"
-    });
-
-    // ─── Everything below runs in the background ───
     const rawVideoId = mp4Key.replace("uploads/", "").replace(".mp4", "");
     const artist = metadata?.artistName || "";
     const title = metadata?.songTitle || "";
@@ -642,8 +633,8 @@ async function startServer() {
       .replace(/[^\w\s-]/g, "")
       .replace(/[\s_]+/g, "-")
       .replace(/^-+|-+$/g, "")
-      .substring(0, 60)
-      + "-" + rawVideoId.split("-")[0];
+      .substring(0, 60) // cap length
+      + "-" + rawVideoId.split("-")[0]; // append timestamp prefix for uniqueness
     const tmpDir = path.join(process.cwd(), "uploads", videoId);
     const rawPath = path.join(tmpDir, "original.mp4");
     const segDir = path.join(tmpDir, "segments");
@@ -651,132 +642,119 @@ async function startServer() {
 
     const r2 = createR2Client(accountId, r2AccessKeyId, r2SecretAccessKey);
 
-    // Wrap the background work in an IIFE so we don't await it (fire-and-forget)
-    (async () => {
-      try {
-        console.log(`[transcode:${videoId}] Starting background job`);
+    try {
+      // 1. Download MP4 from R2
+      const { Body } = await r2.send(new GetObjectCommand({
+        Bucket: bucketName,
+        Key: mp4Key
+      }));
+      const writeStream = fs.createWriteStream(rawPath);
+      await new Promise<void>((resolve, reject) => {
+        (Body as any).pipe(writeStream);
+        writeStream.on("finish", resolve);
+        writeStream.on("error", reject);
+      });
 
-        // 1. Download MP4 from R2
-        console.log(`[transcode:${videoId}] Downloading from R2`);
-        const { Body } = await r2.send(new GetObjectCommand({
-          Bucket: bucketName,
-          Key: mp4Key
-        }));
-        const writeStream = fs.createWriteStream(rawPath);
-        await new Promise<void>((resolve, reject) => {
-          (Body as any).pipe(writeStream);
-          writeStream.on("finish", resolve);
-          writeStream.on("error", reject);
-        });
+      // 2. Transcode to HLS segments
+      const m3u8Path = path.join(segDir, "index.m3u8");
+      await new Promise<void>((resolve, reject) => {
+        ffmpeg(rawPath)
+          .outputOptions([
+            "-c:v libx264",
+            "-profile:v baseline",
+            "-level 3.0",
+            "-c:a aac",
+            "-ar 44100",
+            "-ac 2",
+            "-b:a 128k",
+            "-af aresample=async=1:first_pts=0",
+            "-vf scale=-2:720",
+            "-force_key_frames expr:gte(t,n_forced*6)",
+            "-crf 23",
+            "-preset fast",
+            "-hls_time 6",
+            "-hls_list_size 0",
+            `-hls_segment_filename ${path.join(segDir, "segment_%04d.ts")}`,
+            "-f hls",
+          ])
+          .output(m3u8Path)
+          .on("end", () => resolve())
+          .on("error", (err: any) => reject(err))
+          .run();
+      });
 
-        // 2. Transcode to HLS segments
-        console.log(`[transcode:${videoId}] Running FFmpeg`);
-        const m3u8Path = path.join(segDir, "index.m3u8");
-        await new Promise<void>((resolve, reject) => {
-          ffmpeg(rawPath)
-            .outputOptions([
-              "-c:v libx264",
-              "-profile:v baseline",
-              "-level 3.0",
-              "-c:a aac",
-              "-ar 44100",
-              "-ac 2",
-              "-b:a 128k",
-              "-af aresample=async=1:first_pts=0",
-              "-vf scale=-2:720",
-              "-force_key_frames expr:gte(t,n_forced*6)",
-              "-crf 23",
-              "-preset fast",
-              "-hls_time 6",
-              "-hls_list_size 0",
-              `-hls_segment_filename ${path.join(segDir, "segment_%04d.ts")}`,
-              "-f hls",
-            ])
-            .output(m3u8Path)
-            .on("progress", (progress) => {
-              if (progress.percent) {
-                console.log(`[transcode:${videoId}] FFmpeg: ${progress.percent.toFixed(1)}%`);
-              }
-            })
-            .on("end", () => resolve())
-            .on("error", (err: any) => reject(err))
-            .run();
-        });
+      // 3. Get duration by parsing the generated m3u8
+      const m3u8Content = fs.readFileSync(m3u8Path, "utf-8");
+      const extinfMatches: string[] = m3u8Content.match(/#EXTINF:([\d.]+)/g) || [];
+      const duration: number = extinfMatches.reduce((sum: number, line: string) => {
+        return sum + parseFloat(line.replace("#EXTINF:", ""));
+      }, 0);
 
-        // 3. Get duration
-        const m3u8Content = fs.readFileSync(m3u8Path, "utf-8");
-        const extinfMatches: string[] = m3u8Content.match(/#EXTINF:([\d.]+)/g) || [];
-        const duration: number = extinfMatches.reduce((sum: number, line: string) => {
-          return sum + parseFloat(line.replace("#EXTINF:", ""));
-        }, 0);
-
-        // 4. Upload segments to R2
-        const files = fs.readdirSync(segDir);
-        const BATCH_SIZE = 10;
-        console.log(`[transcode:${videoId}] Uploading ${files.length} files to R2`);
-        for (let i = 0; i < files.length; i += BATCH_SIZE) {
-          const batch = files.slice(i, i + BATCH_SIZE);
-          await Promise.all(batch.map(async (file) => {
-            const filePath = path.join(segDir, file);
-            const fileContent = fs.readFileSync(filePath);
-            await r2.send(new PutObjectCommand({
-              Bucket: bucketName,
-              Key: `streams/${videoId}/${file}`,
-              Body: fileContent,
-              ContentType: file.endsWith(".m3u8") ? "application/x-mpegURL" : "video/mp2t",
-            }));
+      // 4. Upload segments to R2
+      const files = fs.readdirSync(segDir);
+      const BATCH_SIZE = 10;
+      for (let i = 0; i < files.length; i += BATCH_SIZE) {
+        const batch = files.slice(i, i + BATCH_SIZE);
+        await Promise.all(batch.map(async (file) => {
+          const filePath = path.join(segDir, file);
+          const fileContent = fs.readFileSync(filePath);
+          await r2.send(new PutObjectCommand({
+            Bucket: bucketName,
+            Key: `streams/${videoId}/${file}`,
+            Body: fileContent,
+            ContentType: file.endsWith(".m3u8") ? "application/x-mpegURL" : "video/mp2t",
           }));
-        }
-
-        // 5. Count segments
-        const segmentCount = files.filter(f => f.endsWith(".ts")).length;
-
-        // 6. Save to Firestore — this is what the client is watching
-        if (mediaId && dbAdmin) {
-          await dbAdmin.collection("media").doc(mediaId).set({
-            status: "ready",
-            m3u8Url: `${publicBaseUrl}/streams/${videoId}/index.m3u8`,
-            segmentCount,
-            duration,
-            segmentDuration: 6,
-            segmentPrefix: "segment_",
-            segmentPad: 4,
-            r2Path: `streams/${videoId}`,
-            bucketName,
-          }, { merge: true });
-          console.log(`[transcode:${videoId}] Firestore updated: status=ready`);
-        }
-
-        // 7. Delete original MP4
-        try {
-          await r2.send(new DeleteObjectCommand({ Bucket: bucketName, Key: mp4Key }));
-        } catch (e) {
-          console.warn(`[transcode:${videoId}] Could not delete original MP4:`, e);
-        }
-
-        // 8. Cleanup temp files
-        fs.rmSync(tmpDir, { recursive: true, force: true });
-        console.log(`[transcode:${videoId}] Complete: ${segmentCount} segments, ${duration.toFixed(1)}s`);
-
-      } catch (err: any) {
-        console.error(`[transcode:${videoId}] Background job failed:`, err);
-        try {
-          fs.rmSync(tmpDir, { recursive: true, force: true });
-        } catch (e) { /* ignore cleanup errors */ }
-
-        // Update Firestore with error so the client sees the failure
-        if (mediaId && dbAdmin) {
-          try {
-            await dbAdmin.collection("media").doc(mediaId).set({
-              status: "error",
-              errorMessage: err.message || "Transcoding failed",
-            }, { merge: true });
-          } catch (e) {
-            console.error(`[transcode:${videoId}] Failed to update error status:`, e);
-          }
-        }
+        }));
       }
-    })();
+
+      // 5. Count segments
+      const segmentCount = files.filter(f => f.endsWith(".ts")).length;
+
+      // 6. Save to Firestore via Admin SDK
+      if (mediaId && dbAdmin) {
+        await dbAdmin.collection("media").doc(mediaId).set({
+          status: "ready",
+          m3u8Url: `${publicBaseUrl}/streams/${videoId}/index.m3u8`,
+          segmentCount,
+          duration,
+          segmentDuration: 6,
+          segmentPrefix: "segment_",
+          segmentPad: 4,
+          r2Path: `streams/${videoId}`,
+          bucketName,
+        }, { merge: true });
+      } else {
+        console.warn("Skipping Firestore update — dbAdmin unavailable or no mediaId");
+      }
+
+      // 7. Delete original MP4 now that segments are confirmed
+      try {
+        await r2.send(new DeleteObjectCommand({
+          Bucket: bucketName,
+          Key: mp4Key,
+        }));
+      } catch (e) {
+        console.warn("Could not delete original MP4:", e);
+      }
+
+      // 8. Cleanup temp files
+      fs.rmSync(tmpDir, { recursive: true, force: true });
+
+      res.json({
+        success: true,
+        mediaId: mediaId || "new",
+        segmentCount,
+        duration,
+        m3u8Url: `${publicBaseUrl}/streams/${videoId}/index.m3u8`,
+        r2Path: `streams/${videoId}`,
+      });
+
+    } catch (err: any) {
+      console.error("Transcode error:", err);
+      fs.rmSync(tmpDir, { recursive: true, force: true });
+
+      res.status(500).json({ error: err.message });
+    }
   });
 
   app.post("/api/scheduler/check", async (req, res) => {

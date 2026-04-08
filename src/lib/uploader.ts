@@ -114,7 +114,7 @@ export async function uploadVideoToR2(
 
   onProgress("processing", 50, "Transcoding video... (this may take a few minutes)");
 
-  // 4. Call /api/transcode (fire-and-forget — server updates Firestore when done)
+  // 4. Call /api/transcode
   const transcodeResp = await fetch("/api/transcode", {
     method: "POST",
     headers: {
@@ -123,7 +123,7 @@ export async function uploadVideoToR2(
     },
     body: JSON.stringify({
       mp4Key,
-      mediaId,
+      mediaId, // Pass mediaId to transcode endpoint
       configId,
       accountId: cfData.accountId,
       r2AccessKeyId: cfData.r2AccessKeyId,
@@ -139,14 +139,27 @@ export async function uploadVideoToR2(
   });
 
   if (!transcodeResp.ok) {
-    const errorData = await transcodeResp.json().catch(() => ({ error: "Transcoding failed to start" }));
-    throw new Error(errorData.error || "Transcoding failed to start");
+    const errorData = await transcodeResp.json();
+    throw new Error(errorData.error || "Transcoding failed");
   }
 
-  // Server responded immediately. The transcode runs in the background.
-  // The client's MediaLibrary component watches the media doc via onSnapshot
-  // and will update automatically when status changes from "transcoding" → "ready".
-  onProgress("processing", 60, "Transcoding in progress — you can close this window. The library will update automatically when it's ready.");
+  const transcodeData = await transcodeResp.json();
+  const { segmentCount, duration, m3u8Url, r2Path } = transcodeData;
+
+  // 5. Update Firestore with final metadata from server response
+  if (mediaId) {
+    await updateDoc(doc(db, "media", mediaId), {
+      status: "ready",
+      m3u8Url: m3u8Url || `${cfData.publicBaseUrl}/streams/${videoId}/index.m3u8`,
+      segmentCount,
+      duration,
+      segmentDuration: 6,
+      segmentPrefix: "segment_",
+      segmentPad: 4,
+      r2Path: r2Path || `streams/${videoId}`,
+      bucketName: cfData.bucketName,
+    });
+  }
 
   onProgress("done", 100, "Upload complete!");
 
