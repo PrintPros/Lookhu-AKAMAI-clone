@@ -165,6 +165,25 @@ export function MediaLibrary({ profile }: { profile: any }) {
     setTranscodeMessage("Starting upload...");
 
     try {
+      // Check duration
+      const video = document.createElement('video');
+      video.preload = 'metadata';
+      video.src = URL.createObjectURL(selectedFile);
+      const duration = await new Promise<number>((resolve) => {
+        video.onloadedmetadata = () => {
+          resolve(video.duration);
+        };
+      });
+      URL.revokeObjectURL(video.src);
+
+      if (duration > 300) {
+        setTranscodeMessage("Encoding locally (this may take a while)...");
+        const { encodeVideoLocally } = await import("../lib/videoEncoder");
+        const { playlist, segments } = await encodeVideoLocally(selectedFile, (p) => setTranscodeProgress(p));
+        // TODO: Upload segments and playlist to R2
+        toast.success("Local encoding complete!");
+      }
+
       await uploadVideoToR2(
         selectedFile,
         uploadMetadata,
