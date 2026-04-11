@@ -20,6 +20,7 @@
 </head>
 <body>
   <video id="video" autoplay muted playsinline></video>
+  <div id="adContainer" style="position:absolute;top:0;left:0;width:100%;height:100%;display:none;z-index:100;"></div>
   <div id="overlay">
     <div id="channelName"></div>
     <div id="nowPlaying"></div>
@@ -29,6 +30,7 @@
     <p>This channel is not currently broadcasting.</p>
   </div>
   <script src="https://cdn.jsdelivr.net/npm/hls.js@latest"></script>
+  <script src="//imasdk.googleapis.com/js/sdkloader/ima3.js"></script>
   <script>
     const params = new URLSearchParams(window.location.search);
     let workerUrl = params.get('worker') || '';
@@ -38,14 +40,69 @@ workerUrl = workerUrl.replace(/\/(index|live)\.m3u8$/, '');
     const autoplay = params.get('autoplay') !== 'false';
     const muted = params.get('muted') !== 'false';
     const controls = params.get('controls') === 'true';
+    const adsEnabled = params.get('adsEnabled') === 'true';
+    const preRollUrl = params.get('preRollUrl') || '';
+    const midRollUrl = params.get('midRollUrl') || '';
 
     const video = document.getElementById('video');
     const overlay = document.getElementById('overlay');
     const errorEl = document.getElementById('error');
+    const adContainer = document.getElementById('adContainer');
 
     video.muted = muted;
     video.controls = controls;
     document.getElementById('channelName').textContent = channelName;
+
+    // IMA SDK
+    let adsManager, adsLoader, adDisplayContainer;
+    function initializeIMA() {
+      adDisplayContainer = new google.ima.AdDisplayContainer(adContainer, video);
+      adsLoader = new google.ima.AdsLoader(adDisplayContainer);
+      adsLoader.addEventListener(google.ima.AdsManagerLoadedEvent.Type.ADS_MANAGER_LOADED, onAdsManagerLoaded, false);
+      adsLoader.addEventListener(google.ima.AdErrorEvent.Type.AD_ERROR, onAdError, false);
+    }
+    function requestAds(vastUrl) {
+      if (!vastUrl) return;
+      adDisplayContainer.initialize();
+      const adsRequest = new google.ima.AdsRequest();
+      adsRequest.adTagUrl = vastUrl;
+      adsRequest.linearAdSlotWidth = video.clientWidth;
+      adsRequest.linearAdSlotHeight = video.clientHeight;
+      adsLoader.requestAds(adsRequest);
+    }
+    function onAdsManagerLoaded(adsManagerLoadedEvent) {
+      const adsRenderingSettings = new google.ima.AdsRenderingSettings();
+      adsRenderingSettings.restoreCustomPlaybackStateOnAdBreakComplete = true;
+      adsManager = adsManagerLoadedEvent.getAdsManager(video, adsRenderingSettings);
+      adsManager.addEventListener(google.ima.AdErrorEvent.Type.AD_ERROR, onAdError);
+      adsManager.addEventListener(google.ima.AdEvent.Type.CONTENT_PAUSE_REQUESTED, () => {
+        video.pause();
+        adContainer.style.display = 'block';
+      });
+      adsManager.addEventListener(google.ima.AdEvent.Type.CONTENT_RESUME_REQUESTED, () => {
+        adContainer.style.display = 'none';
+        video.play().catch(() => {});
+      });
+      adsManager.addEventListener(google.ima.AdEvent.Type.ALL_ADS_COMPLETED, () => {
+        adContainer.style.display = 'none';
+        video.play().catch(() => {});
+      });
+      try {
+        adsManager.init(video.clientWidth, video.clientHeight, google.ima.ViewMode.NORMAL);
+        adsManager.start();
+      } catch (e) {
+        console.error('AdsManager start error', e);
+        video.play().catch(() => {});
+      }
+    }
+    function onAdError(adErrorEvent) {
+      console.error('IMA error', adErrorEvent.getError());
+      if (adsManager) adsManager.destroy();
+      adContainer.style.display = 'none';
+      video.play().catch(() => {});
+    }
+
+    if (adsEnabled) initializeIMA();
 
     if (!workerUrl) {
       errorEl.classList.add('show');
@@ -53,6 +110,8 @@ workerUrl = workerUrl.replace(/\/(index|live)\.m3u8$/, '');
     } else {
       const hlsUrl = workerUrl.replace(/\/$/, '') + '/index.m3u8';
       const nowUrl = workerUrl.replace(/\/$/, '') + '/now.json';
+
+      const servedBreaks = new Set();
 
       if (Hls.isSupported()) {
         const hls = new Hls({
@@ -63,7 +122,23 @@ workerUrl = workerUrl.replace(/\/(index|live)\.m3u8$/, '');
         hls.loadSource(hlsUrl);
         hls.attachMedia(video);
         hls.on(Hls.Events.MANIFEST_PARSED, () => {
-          if (autoplay) video.play().catch(() => {});
+          if (adsEnabled && preRollUrl) {
+            requestAds(preRollUrl);
+          } else if (autoplay) {
+            video.play().catch(() => {});
+          }
+        });
+        hls.on(Hls.Events.LEVEL_UPDATED, (_, data) => {
+          if (!midRollUrl || !adsEnabled) return;
+          const dateRanges = data.details?.dateRanges;
+          if (!dateRanges) return;
+          for (const dr of Object.values(dateRanges)) {
+            if (dr.id?.startsWith('ad-break-') && !servedBreaks.has(dr.id)) {
+              servedBreaks.add(dr.id);
+              console.log('Mid-roll triggered for break:', dr.id);
+              requestAds(midRollUrl);
+            }
+          }
         });
         hls.on(Hls.Events.ERROR, (e, data) => {
           if (data.fatal) {
