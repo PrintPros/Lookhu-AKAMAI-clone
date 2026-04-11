@@ -5,7 +5,7 @@ import { Card, CardContent, CardHeader, CardTitle, CardDescription, CardFooter }
 import { Badge } from "./ui/Badge";
 import { Input } from "./ui/Input";
 import { Channel, Playlist, Media, ScheduledPublish } from "../types";
-import { collection, query, where, onSnapshot, addDoc, deleteDoc, doc, updateDoc, orderBy, limit } from "firebase/firestore";
+import { collection, query, where, onSnapshot, addDoc, deleteDoc, doc, updateDoc, orderBy, limit, getDoc } from "firebase/firestore";
 import { db, auth } from "../firebase";
 import { VideoPlayer } from "./VideoPlayer";
 import { Dialog } from "./ui/Dialog";

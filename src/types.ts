@@ -146,6 +146,16 @@ export interface AdConfig {
   breakDurationSeconds: number;
   enabled: boolean;
   label?: string;
+  houseAds?: Array<{
+    id: string;
+    name: string;
+    type: 'station_id' | 'promo' | 'fallback';
+    url: string;
+    duration: number;
+    weight: number;
+  }>;
+  useFallback?: boolean;
+  forceFrequency?: number;
 }
 
 export interface ManifestProgram {

@@ -43,6 +43,10 @@ workerUrl = workerUrl.replace(/\/(index|live)\.m3u8$/, '');
     const adsEnabled = params.get('adsEnabled') === 'true';
     const preRollUrl = params.get('preRollUrl') || '';
     const midRollUrl = params.get('midRollUrl') || '';
+    const useFallback = params.get('useFallback') === 'true';
+    const forceFrequency = parseInt(params.get('forceFrequency') || '0');
+    const houseAds = JSON.parse(params.get('houseAds') || '[]');
+    let breakCounter = 0;
 
     const video = document.getElementById('video');
     const overlay = document.getElementById('overlay');
@@ -99,7 +103,46 @@ workerUrl = workerUrl.replace(/\/(index|live)\.m3u8$/, '');
       console.error('IMA error', adErrorEvent.getError());
       if (adsManager) adsManager.destroy();
       adContainer.style.display = 'none';
-      video.play().catch(() => {});
+      if (useFallback && houseAds.length > 0) {
+        playHouseAd();
+      } else {
+        video.play().catch(() => {});
+      }
+    }
+
+    function playHouseAd() {
+      if (houseAds.length === 0) return;
+      // Weighted random
+      const totalWeight = houseAds.reduce((sum, ad) => sum + ad.weight, 0);
+      let random = Math.random() * totalWeight;
+      let selectedAd = houseAds[0];
+      for (const ad of houseAds) {
+        if (random < ad.weight) {
+          selectedAd = ad;
+          break;
+        }
+        random -= ad.weight;
+      }
+
+      video.pause();
+      const adVideo = document.createElement('video');
+      adVideo.src = selectedAd.url;
+      adVideo.style.position = 'absolute';
+      adVideo.style.top = '0';
+      adVideo.style.left = '0';
+      adVideo.style.width = '100%';
+      adVideo.style.height = '100%';
+      adVideo.style.zIndex = '200';
+      adVideo.autoplay = true;
+      adVideo.muted = muted;
+      adContainer.appendChild(adVideo);
+      adContainer.style.display = 'block';
+      adVideo.play().catch(() => {});
+      adVideo.addEventListener('ended', () => {
+        adContainer.removeChild(adVideo);
+        adContainer.style.display = 'none';
+        video.play().catch(() => {});
+      });
     }
 
     if (adsEnabled) initializeIMA();
@@ -136,7 +179,12 @@ workerUrl = workerUrl.replace(/\/(index|live)\.m3u8$/, '');
             if (dr.id?.startsWith('ad-break-') && !servedBreaks.has(dr.id)) {
               servedBreaks.add(dr.id);
               console.log('Mid-roll triggered for break:', dr.id);
-              requestAds(midRollUrl);
+              breakCounter++;
+              if (forceFrequency > 0 && breakCounter % forceFrequency === 0) {
+                playHouseAd();
+              } else {
+                requestAds(midRollUrl);
+              }
             }
           }
         });

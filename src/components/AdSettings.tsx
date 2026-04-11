@@ -1,9 +1,14 @@
 import { useState, useEffect } from "react";
-import { db } from "../firebase";
+import { db, auth } from "../firebase";
 import { 
   doc, 
   getDoc, 
-  setDoc
+  setDoc,
+  collection,
+  query,
+  where,
+  getDocs,
+  limit
 } from "firebase/firestore";
 import { AdConfig } from "../types";
 import { Card } from "./ui/Card";
@@ -31,7 +36,10 @@ export function AdSettings() {
     midRollUrl: "",
     adPodSize: 3,
     breakDurationSeconds: 30,
-    enabled: false
+    enabled: false,
+    houseAds: [],
+    useFallback: false,
+    forceFrequency: 0
   });
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
@@ -71,6 +79,82 @@ export function AdSettings() {
     } catch (error) {
       handleFirestoreError(error, OperationType.WRITE, "settings/ads");
       setMessage({ type: "error", text: "Failed to save ad settings." });
+    } finally {
+      setSaving(false);
+    }
+  };
+
+  const handleUploadHouseAd = async (file: File) => {
+    setSaving(true);
+    try {
+      // 1. Get active bucket config
+      const cfQ = query(
+        collection(db, "cloudflareConfigs"),
+        where("userId", "==", auth.currentUser?.uid),
+        where("isActive", "==", true),
+        limit(1)
+      );
+      const cfSnap = await getDocs(cfQ);
+      if (cfSnap.empty) {
+        setMessage({ type: "error", text: "No active R2 bucket connected." });
+        return;
+      }
+      const cfData = cfSnap.docs[0].data();
+      const configId = cfSnap.docs[0].id;
+
+      // 2. Get presigned URL
+      const idToken = await auth.currentUser!.getIdToken();
+      const mp4Key = `house-ads/${Date.now()}-${file.name.replace(/[^a-z0-9]/g, "-")}`;
+      
+      const presignResp = await fetch("/api/r2/presign-secure", {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+          "Authorization": `Bearer ${idToken}`,
+        },
+        body: JSON.stringify({
+          configId,
+          accountId: cfData.accountId,
+          r2AccessKeyId: cfData.r2AccessKeyId,
+          r2SecretAccessKey: cfData.r2SecretAccessKey,
+          bucketName: cfData.bucketName,
+          keys: [{ key: mp4Key, contentType: "video/mp4" }]
+        }),
+      });
+
+      if (!presignResp.ok) {
+        setMessage({ type: "error", text: "Failed to get upload URL" });
+        return;
+      }
+      const { urls } = await presignResp.json();
+      const { uploadUrl } = urls[0];
+
+      // 3. Upload MP4 to R2
+      const uploadResp = await fetch(uploadUrl, {
+        method: "PUT",
+        body: file,
+        headers: { "Content-Type": "video/mp4" },
+      });
+
+      if (!uploadResp.ok) {
+        setMessage({ type: "error", text: "Failed to upload video to R2" });
+        return;
+      }
+
+      // 4. Update config
+      const newAd = {
+        id: Date.now().toString(),
+        name: file.name,
+        type: 'promo',
+        url: `${cfData.publicBaseUrl}/${mp4Key}`,
+        duration: 0, 
+        weight: 5
+      };
+      setConfig({ ...config, houseAds: [...(config.houseAds || []), newAd] });
+      setMessage({ type: "success", text: "House ad uploaded successfully." });
+    } catch (error) {
+      console.error(error);
+      setMessage({ type: "error", text: "Failed to upload house ad." });
     } finally {
       setSaving(false);
     }
@@ -200,6 +284,94 @@ export function AdSettings() {
               </div>
             </div>
             <p className="text-[10px] text-zinc-400">Ad break positions are set in the Playlists editor. This setting controls how many ads play during each break.</p>
+          </div>
+        </Card>
+
+        {/* House Ads Config */}
+        <Card className="p-6 space-y-6 md:col-span-2">
+          <div className="flex items-center justify-between">
+            <div className="flex items-center gap-3">
+              <div className="h-10 w-10 rounded-xl bg-orange-100 text-orange-600 flex items-center justify-center">
+                <PlayCircle className="h-6 w-6" />
+              </div>
+              <div>
+                <h3 className="font-bold text-zinc-900">House Ads & Station IDs</h3>
+                <p className="text-xs text-zinc-500">Plays when SpringServe has no fill OR every Nth break.</p>
+              </div>
+            </div>
+            <div className="flex items-center gap-4">
+              <div className="flex items-center gap-2">
+                <span className="text-xs font-bold text-zinc-500 uppercase">Use as Fallback</span>
+                <button 
+                  onClick={() => setConfig({ ...config, useFallback: !config.useFallback })}
+                  className={`transition-colors ${config.useFallback ? 'text-green-600' : 'text-zinc-400'}`}
+                >
+                  {config.useFallback ? <ToggleRight className="h-6 w-6" /> : <ToggleLeft className="h-6 w-6" />}
+                </button>
+              </div>
+              <div className="flex items-center gap-2">
+                <span className="text-xs font-bold text-zinc-500 uppercase">Force Rotation (every N breaks)</span>
+                <Input 
+                  type="number"
+                  min={0}
+                  value={config.forceFrequency || 0}
+                  onChange={(e) => setConfig({ ...config, forceFrequency: parseInt(e.target.value) })}
+                  className="w-16 bg-zinc-50 border-zinc-200"
+                />
+              </div>
+            </div>
+          </div>
+
+          <div className="space-y-4">
+            <label className="block text-xs font-bold text-zinc-500 uppercase tracking-wider">Upload House Ad (MP4)</label>
+            <Input 
+              type="file"
+              accept="video/mp4"
+              onChange={(e) => {
+                if (e.target.files && e.target.files[0]) {
+                  handleUploadHouseAd(e.target.files[0]);
+                }
+              }}
+              className="bg-zinc-50 border-zinc-200"
+            />
+          </div>
+
+          <div className="space-y-2">
+            {config.houseAds?.map((ad, index) => (
+              <div key={ad.id} className="flex items-center gap-4 p-3 bg-zinc-50 rounded-lg">
+                <div className="h-10 w-10 bg-zinc-200 rounded flex items-center justify-center">
+                  <PlayCircle className="h-5 w-5 text-zinc-500" />
+                </div>
+                <div className="flex-1">
+                  <p className="text-sm font-bold">{ad.name}</p>
+                  <p className="text-xs text-zinc-500">{ad.type}</p>
+                </div>
+                <div className="w-32">
+                  <label className="text-[10px] text-zinc-500">Weight</label>
+                  <Input 
+                    type="range"
+                    min={1}
+                    max={10}
+                    value={ad.weight}
+                    onChange={(e) => {
+                      const newAds = [...(config.houseAds || [])];
+                      newAds[index].weight = parseInt(e.target.value);
+                      setConfig({ ...config, houseAds: newAds });
+                    }}
+                  />
+                </div>
+                <Button 
+                  variant="ghost" 
+                  size="sm"
+                  onClick={() => {
+                    const newAds = (config.houseAds || []).filter((_, i) => i !== index);
+                    setConfig({ ...config, houseAds: newAds });
+                  }}
+                >
+                  Delete
+                </Button>
+              </div>
+            ))}
           </div>
         </Card>
       </div>
