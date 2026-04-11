@@ -62,15 +62,18 @@ export function Sidebar({
 
   return (
     <div className="flex h-screen w-64 flex-col border-r border-zinc-200 bg-white p-4">
-      <div className="mb-8 px-2">
-        <h1 className="text-xl font-black tracking-tight text-zinc-900 uppercase">FastFasts</h1>
-        <p className="text-[10px] text-zinc-500 uppercase tracking-[0.2em] font-bold mt-0.5">Fast Channel Platform</p>
+      <div className="mb-8 px-2 flex items-center gap-3">
+        <img src="/favicon.png" alt="FastFasts Logo" className="h-10 w-10" />
+        <div>
+          <h1 className="text-xl font-black tracking-tight text-zinc-900 uppercase">FastFasts</h1>
+          <p className="text-[10px] text-zinc-500 uppercase tracking-[0.2em] font-bold mt-0.5">Fast Channel Platform</p>
+        </div>
+      </div>
         {role && (
           <div className="mt-2 inline-flex items-center rounded-full bg-zinc-100 px-2 py-0.5 text-[10px] font-bold text-zinc-600 uppercase tracking-wider">
             {role.replace("_", " ")}
           </div>
         )}
-      </div>
 
       <nav className="flex-1 space-y-1 overflow-y-auto">
         <div className="space-y-1">
@@ -81,7 +84,7 @@ export function Sidebar({
               className={cn(
                 "flex w-full items-center gap-3 rounded-lg px-3 py-2 text-sm font-medium transition-colors relative",
                 activeTab === item.id
-                  ? "bg-zinc-900 text-white"
+                  ? "bg-blue-600 text-white"
                   : "text-zinc-600 hover:bg-zinc-100 hover:text-zinc-900"
               )}
             >

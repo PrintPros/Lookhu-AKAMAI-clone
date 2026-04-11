@@ -165,87 +165,35 @@ export function MediaLibrary({ profile }: { profile: any }) {
     setTranscodeMessage("Starting upload...");
 
     try {
-      // Check duration
+      // Check duration — we only support videos up to 4.5 minutes via the web UI
+      // (leaves a safety margin under the nginx 5-min proxy timeout)
+      // Longer content must be imported via the bulk import tool.
       const video = document.createElement('video');
       video.preload = 'metadata';
       video.src = URL.createObjectURL(selectedFile);
-      const duration = await new Promise<number>((resolve) => {
+      const duration = await new Promise<number>((resolve, reject) => {
         video.onloadedmetadata = () => {
-          resolve(video.duration);
+          const d = video.duration;
+          if (!isFinite(d) || isNaN(d) || d <= 0) {
+            reject(new Error("Could not read video duration"));
+          } else {
+            resolve(d);
+          }
         };
+        video.onerror = () => reject(new Error("Failed to load video metadata"));
+        setTimeout(() => reject(new Error("Timeout reading video metadata")), 10000);
       });
       URL.revokeObjectURL(video.src);
 
-      if (duration > 300) {
-        setTranscodeMessage("Encoding locally (this may take a while)...");
-        const { encodeVideoLocally } = await import("../lib/videoEncoder");
-        const { playlist, segments } = await encodeVideoLocally(selectedFile, (p) => setTranscodeProgress(p));
-        
-        setTranscodeMessage("Uploading encoded segments...");
-        // Get upload URLs for segments and playlist
-        const idToken = await auth.currentUser!.getIdToken();
-        const videoId = `${Date.now()}-${(uploadMetadata.artistName || "unknown").toLowerCase().replace(/[^a-z0-9]/g, "-").slice(0, 20)}`;
-        
-        // Find active config
-        const cfQ = query(
-          collection(db, "cloudflareConfigs"),
-          where("userId", "==", auth.currentUser!.uid),
-          where("isActive", "==", true),
-          limit(1)
+      const MAX_DURATION_SECONDS = 270; // 4.5 minutes
+      if (duration > MAX_DURATION_SECONDS) {
+        const mins = Math.round(duration / 60);
+        toast.error(
+          `Video is ${mins} minutes long. Web uploads are limited to 4.5 minutes. For longer content, please use the bulk import tool.`
         );
-        const cfSnap = await getDocs(cfQ);
-        if (cfSnap.empty) throw new Error("No active R2 bucket connected.");
-        const config = cfSnap.docs[0].data();
-
-        // 1. Create placeholder
-        const mediaRef = await addDoc(collection(db, "media"), {
-          ...uploadMetadata,
-          status: "uploading",
-          userId: auth.currentUser!.uid,
-          createdAt: new Date().toISOString(),
-          bucketName: config.bucketName,
-          r2Path: `streams/${videoId}`,
-          videoId,
-          m3u8Url: "",
-          segmentCount: segments.length,
-          duration: duration,
-        });
-
-        // 2. Get presigned URLs
-        const keys = [{ key: `streams/${videoId}/index.m3u8`, contentType: "application/x-mpegURL" }, ...segments.map(s => ({ key: `streams/${videoId}/${s.name}`, contentType: "video/MP2T" }))];
-        const presignResp = await fetch("/api/r2/presign-secure", {
-          method: "POST",
-          headers: { "Content-Type": "application/json", "Authorization": `Bearer ${idToken}` },
-          body: JSON.stringify({
-            configId: cfSnap.docs[0].id,
-            accountId: config.accountId,
-            r2AccessKeyId: config.r2AccessKeyId,
-            r2SecretAccessKey: config.r2SecretAccessKey,
-            bucketName: config.bucketName,
-            keys
-          }),
-        });
-        if (!presignResp.ok) throw new Error("Failed to get upload URLs");
-        const { urls } = await presignResp.json();
-
-        // 3. Upload playlist and segments
-        const playlistUrl = urls.find((u: any) => u.key.endsWith('index.m3u8')).uploadUrl;
-        await fetch(playlistUrl, { method: "PUT", body: playlist, headers: { "Content-Type": "application/x-mpegURL" } });
-
-        for (const seg of segments) {
-          const uploadUrl = urls.find((u: any) => u.key.endsWith(seg.name)).uploadUrl;
-          await fetch(uploadUrl, { method: "PUT", body: seg.data, headers: { "Content-Type": "video/MP2T" } });
-        }
-
-        // 4. Update status
-        await updateDoc(doc(db, "media", mediaRef.id), {
-          status: "ready",
-          m3u8Url: `${config.publicBaseUrl}/streams/${videoId}/index.m3u8`
-        });
-
-        toast.success("Local encoding and upload complete!");
-        setTranscodePhase("done");
-        return; // Skip standard upload
+        setTranscodePhase("idle");
+        setUploading(false);
+        return;
       }
 
       await uploadVideoToR2(
@@ -457,8 +405,8 @@ export function MediaLibrary({ profile }: { profile: any }) {
                 <div className="p-4 bg-blue-50 border border-blue-200 rounded-lg flex gap-3">
                   <Clock className="h-5 w-5 text-blue-600 shrink-0" />
                   <div className="text-sm text-blue-800">
-                    <p className="font-bold">Server-side Processing</p>
-                    <p>Your video will be uploaded and then processed on our servers. You can continue using the app while it's being prepared.</p>
+                    <p className="font-bold">Web Upload Limit: 4.5 Minutes</p>
+                    <p>Videos will be transcoded on our servers. For longer content (TV shows, movies, full-length videos), use the bulk import tool.</p>
                   </div>
                 </div>
 
