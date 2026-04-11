@@ -103,17 +103,19 @@ export function AdSettings() {
         setTimeout(() => reject(new Error('Timeout')), 10000);
       });
 
-      // Validate duration matches break duration ± 2 seconds
-      const expectedDuration = config.breakDurationSeconds || 30;
-      if (Math.abs(duration - expectedDuration) > 2) {
-        const validDurations = [15, 30, 60, 90, 120];
-        const closest = validDurations.reduce((prev, curr) => 
-          Math.abs(curr - duration) < Math.abs(prev - duration) ? curr : prev
-        );
-        toast.error(`House ad must be approximately ${expectedDuration}s to match your break duration. This file is ${duration.toFixed(1)}s. Standard durations are 15, 30, or 60 seconds. Closest standard: ${closest}s.`);
+      // Validate duration matches standard broadcast lengths ± 1.5 seconds
+      const STANDARD_DURATIONS = [15, 30, 60, 90, 120];
+      const TOLERANCE = 1.5;
+      const isStandard = STANDARD_DURATIONS.some(std => Math.abs(duration - std) <= TOLERANCE);
+      if (!isStandard) {
+        toast.error(`House ads must be a standard broadcast length: 15s, 30s, 60s, 90s, or 120s. This file is ${duration.toFixed(1)}s. Please trim or pad to a standard length.`);
         setSaving(false);
         return;
       }
+      // Snap to nearest standard for clean storage
+      const snappedDuration = STANDARD_DURATIONS.reduce((prev, curr) => 
+        Math.abs(curr - duration) < Math.abs(prev - duration) ? curr : prev
+      );
 
       // 1. Get active bucket config
       const cfQ = query(
@@ -175,10 +177,18 @@ export function AdSettings() {
         name: file.name,
         type: 'promo' as const,
         url: `${cfData.publicBaseUrl}/${mp4Key}`,
-        duration: duration, 
+        duration: snappedDuration, 
+        actualDuration: duration,
         weight: 5
       };
-      setConfig({ ...config, houseAds: [...(config.houseAds || []), newAd] });
+      
+      setConfig(prev => {
+        const updated = { ...prev, houseAds: [...(prev.houseAds || []), newAd] };
+        setDoc(doc(db, 'settings', 'ads'), updated, { merge: true })
+          .catch(err => console.error('Failed to auto-save house ad:', err));
+        return updated;
+      });
+      
       setMessage({ type: "success", text: "House ad uploaded successfully." });
     } catch (error) {
       console.error(error);
@@ -226,8 +236,13 @@ export function AdSettings() {
         });
       }
 
-      const newAds = (config.houseAds || []).filter((_, i) => i !== index);
-      setConfig({ ...config, houseAds: newAds });
+      setConfig(prev => {
+        const newAds = (prev.houseAds || []).filter((_, i) => i !== index);
+        const updated = { ...prev, houseAds: newAds };
+        setDoc(doc(db, 'settings', 'ads'), updated, { merge: true })
+          .catch(err => console.error('Failed to auto-save after removal:', err));
+        return updated;
+      });
       setMessage({ type: "success", text: "House ad removed." });
     } catch (error) {
       console.error(error);
@@ -349,7 +364,7 @@ export function AdSettings() {
                 />
               </div>
               <div className="space-y-2">
-                <label className="text-xs font-bold text-zinc-500 uppercase tracking-wider">Break duration (sec)</label>
+                <label className="text-xs font-bold text-zinc-500 uppercase tracking-wider">Default break duration (sec)</label>
                 <Input 
                   type="number"
                   min={10}
@@ -360,7 +375,7 @@ export function AdSettings() {
                 />
               </div>
             </div>
-            <p className="text-[10px] text-zinc-400">Ad break positions are set in the Playlists editor. This setting controls how many ads play during each break.</p>
+            <p className="text-[10px] text-zinc-400">Used as the fallback when a playlist ad break does not specify its own duration. Individual breaks in the playlist editor can override this.</p>
           </div>
         </Card>
 
