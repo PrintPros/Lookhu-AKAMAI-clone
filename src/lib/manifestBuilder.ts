@@ -22,6 +22,16 @@ export function buildManifest(
   cloudflareConfigs: CloudflareConfig[],
   adConfig: AdConfig
 ): ChannelManifest {
+  // Backward compatibility: if items is missing but mediaIds exists
+  if (!playlist.items && playlist.mediaIds) {
+    playlist.items = playlist.mediaIds.map(id => {
+      if (id === "__AD_BREAK__") {
+        return { id: Math.random().toString(36).substring(7), isAdBreak: true };
+      }
+      return { id: Math.random().toString(36).substring(7), mediaId: id, isAdBreak: false };
+    });
+  }
+
   const channelSlug = channel.channelSlug || slugify(channel.name);
 
   // Filter for ready media and order by playlist.items

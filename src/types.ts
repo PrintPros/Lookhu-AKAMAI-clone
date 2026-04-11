@@ -68,6 +68,7 @@ export interface Playlist {
   id: string;
   name: string;
   items: PlaylistItem[];
+  mediaIds?: string[]; // deprecated
   createdAt: string;
   userId: string;
   genre?: string;

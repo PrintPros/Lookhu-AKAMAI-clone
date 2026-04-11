@@ -4,7 +4,7 @@ import { Button } from "./ui/Button";
 import { Card, CardContent, CardHeader, CardTitle, CardDescription, CardFooter } from "./ui/Card";
 import { Input } from "./ui/Input";
 import { Badge } from "./ui/Badge";
-import { Media, Playlist } from "../types";
+import { Media, Playlist, PlaylistItem } from "../types";
 import { collection, query, where, onSnapshot, addDoc, deleteDoc, doc, updateDoc } from "firebase/firestore";
 import { db, auth } from "../firebase";
 import { cn } from "../lib/utils";
@@ -29,14 +29,14 @@ import { CSS } from "@dnd-kit/utilities";
 
 interface SortableItemProps {
   id: string;
-  mediaId: string;
+  item: PlaylistItem;
   index: number;
-  item?: Media;
+  media?: Media;
   onRemove: (index: number) => void;
   key?: string;
 }
 
-function SortableItem({ id, mediaId, index, item, onRemove }: SortableItemProps) {
+function SortableItem({ id, item, index, media, onRemove }: SortableItemProps) {
   const displayName = (m: Media) => m.artistName && m.songTitle 
     ? `${m.artistName} — ${m.songTitle}` 
     : m.songTitle || m.artistName || m.name;
@@ -57,9 +57,7 @@ function SortableItem({ id, mediaId, index, item, onRemove }: SortableItemProps)
     opacity: isDragging ? 0.5 : 1,
   };
 
-  const isAdBreak = mediaId === "__AD_BREAK__";
-
-  if (isAdBreak) {
+  if (item.isAdBreak) {
     return (
       <div
         ref={setNodeRef}
@@ -102,22 +100,22 @@ function SortableItem({ id, mediaId, index, item, onRemove }: SortableItemProps)
       </div>
       <div className="flex-1 min-w-0">
         <div className="flex items-center gap-2">
-          <p className="text-sm font-medium truncate">{item ? displayName(item) : "Unknown Media"}</p>
-          {item?.genre && (
+          <p className="text-sm font-medium truncate">{media ? displayName(media) : "Unknown Media"}</p>
+          {media?.genre && (
             <Badge className={cn(
               "text-[8px] h-3.5 px-1 border-none text-white",
-              item.genre === "Hip Hop" ? "bg-purple-600" :
-              item.genre === "Rock" ? "bg-red-600" :
-              item.genre === "EDM" ? "bg-blue-600" :
-              item.genre === "R&B" ? "bg-pink-600" :
-              item.genre === "Latin" ? "bg-amber-600" : "bg-zinc-600"
+              media.genre === "Hip Hop" ? "bg-purple-600" :
+              media.genre === "Rock" ? "bg-red-600" :
+              media.genre === "EDM" ? "bg-blue-600" :
+              media.genre === "R&B" ? "bg-pink-600" :
+              media.genre === "Latin" ? "bg-amber-600" : "bg-zinc-600"
             )}>
-              {item.genre}
+              {media.genre}
             </Badge>
           )}
         </div>
         <div className="flex items-center gap-2 text-xs text-zinc-500">
-          <span>{item?.duration ? `${Math.floor(item.duration / 60)} min` : "No duration"}</span>
+          <span>{media?.duration ? `${Math.floor(media.duration / 60)} min` : "No duration"}</span>
         </div>
       </div>
       <Button
@@ -165,7 +163,15 @@ export function PlaylistEditor({ profile }: { profile: any }) {
     }
 
     const unsubscribePlaylists = onSnapshot(playlistsQ, (snapshot) => {
-      setPlaylists(snapshot.docs.map((doc) => ({ ...doc.data(), id: doc.id })) as Playlist[]);
+      setPlaylists(snapshot.docs.map((doc) => {
+        const data = doc.data();
+        const items = data.items || (data.mediaIds || []).map((id: string) => 
+          id === "__AD_BREAK__" 
+            ? { id: Math.random().toString(36).substring(7), isAdBreak: true }
+            : { id: Math.random().toString(36).substring(7), mediaId: id, isAdBreak: false }
+        );
+        return { ...data, id: doc.id, items };
+      }) as Playlist[]);
     }, (error) => {
       handleFirestoreError(error, OperationType.GET, "playlists");
     });
@@ -225,7 +231,7 @@ export function PlaylistEditor({ profile }: { profile: any }) {
     if (!editingPlaylist) return;
     setEditingPlaylist({
       ...editingPlaylist,
-      items: [...editingPlaylist.items, { id: `${mediaId}-${Date.now()}`, mediaId }],
+      items: [...editingPlaylist.items, { id: `${mediaId}-${Date.now()}`, mediaId, isAdBreak: false }],
     });
   };
 
@@ -322,9 +328,9 @@ export function PlaylistEditor({ profile }: { profile: any }) {
                       <SortableItem
                         key={item.id}
                         id={item.id}
-                        mediaId={item.mediaId || "__AD_BREAK__"}
+                        item={item}
                         index={index}
-                        item={media.find(m => m.id === item.mediaId)}
+                        media={media.find(m => m.id === item.mediaId)}
                         onRemove={removeFromPlaylist}
                       />
                     ))}
