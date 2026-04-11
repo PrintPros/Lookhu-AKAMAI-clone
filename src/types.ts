@@ -62,6 +62,7 @@ export interface PlaylistItem {
   id: string; // unique ID
   mediaId?: string;
   isAdBreak?: boolean;
+  duration?: number; // duration in seconds for ad breaks (15/30/60/90/120)
 }
 
 export interface Playlist {
@@ -167,6 +168,7 @@ export interface ManifestProgram {
   prefix: string;
   pad: number;
   adBreakAfter?: boolean;
+  breakDurationSeconds?: number;
 }
 
 export interface ChannelManifest {

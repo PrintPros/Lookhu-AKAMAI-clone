@@ -1,11 +1,11 @@
 import { useState, useEffect } from "react";
-import { ListMusic, Plus, Trash2, GripVertical, FileVideo, Save, X, Film } from "lucide-react";
+import { ListMusic, Plus, Trash2, GripVertical, FileVideo, Save, X, Film, Edit2 } from "lucide-react";
 import { Button } from "./ui/Button";
 import { Card, CardContent, CardHeader, CardTitle, CardDescription, CardFooter } from "./ui/Card";
 import { Input } from "./ui/Input";
 import { Badge } from "./ui/Badge";
 import { Media, Playlist, PlaylistItem } from "../types";
-import { collection, query, where, onSnapshot, addDoc, deleteDoc, doc, updateDoc } from "firebase/firestore";
+import { collection, query, where, onSnapshot, addDoc, deleteDoc, doc, updateDoc, getDoc } from "firebase/firestore";
 import { db, auth } from "../firebase";
 import { cn } from "../lib/utils";
 import { handleFirestoreError, OperationType } from "../lib/firestore-errors";
@@ -33,10 +33,13 @@ interface SortableItemProps {
   index: number;
   media?: Media;
   onRemove: (index: number) => void;
+  onUpdateDuration?: (index: number, duration: number) => void;
+  defaultBreakDuration?: number;
   key?: string;
 }
 
-function SortableItem({ id, item, index, media, onRemove }: SortableItemProps) {
+function SortableItem({ id, item, index, media, onRemove, onUpdateDuration, defaultBreakDuration = 30 }: SortableItemProps) {
+  const [isEditingDuration, setIsEditingDuration] = useState(false);
   const displayName = (m: Media) => m.artistName && m.songTitle 
     ? `${m.artistName} — ${m.songTitle}` 
     : m.songTitle || m.artistName || m.name;
@@ -58,6 +61,7 @@ function SortableItem({ id, item, index, media, onRemove }: SortableItemProps) {
   };
 
   if (item.isAdBreak) {
+    const duration = item.duration || defaultBreakDuration;
     return (
       <div
         ref={setNodeRef}
@@ -71,8 +75,37 @@ function SortableItem({ id, item, index, media, onRemove }: SortableItemProps) {
           <Film className="h-4 w-4 text-amber-500" />
         </div>
         <div className="flex-1 min-w-0">
-          <p className="text-sm font-bold text-amber-900">AD BREAK</p>
-          <p className="text-xs text-amber-600">Mid-roll insertion point</p>
+          <div className="flex items-center gap-2">
+            <p className="text-sm font-bold text-amber-900">AD BREAK — {duration}s</p>
+            <Button
+              size="icon"
+              variant="ghost"
+              className="h-6 w-6 text-amber-600 opacity-0 group-hover:opacity-100 transition-opacity"
+              onClick={() => setIsEditingDuration(!isEditingDuration)}
+            >
+              <Edit2 className="h-3 w-3" />
+            </Button>
+          </div>
+          {isEditingDuration ? (
+            <div className="flex gap-1 mt-1">
+              {[15, 30, 60, 90, 120].map(d => (
+                <Button
+                  key={d}
+                  size="sm"
+                  variant={duration === d ? "default" : "outline"}
+                  className={cn("h-6 px-2 text-[10px]", duration === d ? "bg-amber-600 hover:bg-amber-700" : "border-amber-300 text-amber-700")}
+                  onClick={() => {
+                    onUpdateDuration?.(index, d);
+                    setIsEditingDuration(false);
+                  }}
+                >
+                  {d}s
+                </Button>
+              ))}
+            </div>
+          ) : (
+            <p className="text-xs text-amber-600">Mid-roll insertion point</p>
+          )}
         </div>
         <Button
           size="icon"
@@ -136,6 +169,7 @@ export function PlaylistEditor({ profile }: { profile: any }) {
   const [isCreating, setIsCreating] = useState(false);
   const [newPlaylistName, setNewPlaylistName] = useState("");
   const [editingPlaylist, setEditingPlaylist] = useState<Playlist | null>(null);
+  const [adSettings, setAdSettings] = useState<any>(null);
 
   const displayName = (m: Media) => m.artistName && m.songTitle 
     ? `${m.artistName} — ${m.songTitle}` 
@@ -147,6 +181,16 @@ export function PlaylistEditor({ profile }: { profile: any }) {
       coordinateGetter: sortableKeyboardCoordinates,
     })
   );
+
+  useEffect(() => {
+    const fetchAdSettings = async () => {
+      const snap = await getDoc(doc(db, "settings", "ads"));
+      if (snap.exists()) {
+        setAdSettings(snap.data());
+      }
+    };
+    fetchAdSettings();
+  }, []);
 
   useEffect(() => {
     if (!auth.currentUser || !profile) return;
@@ -332,22 +376,48 @@ export function PlaylistEditor({ profile }: { profile: any }) {
                         index={index}
                         media={media.find(m => m.id === item.mediaId)}
                         onRemove={removeFromPlaylist}
+                        onUpdateDuration={(idx, duration) => {
+                          const newItems = [...editingPlaylist.items];
+                          newItems[idx] = { ...newItems[idx], duration };
+                          setEditingPlaylist({ ...editingPlaylist, items: newItems });
+                        }}
+                        defaultBreakDuration={adSettings?.breakDurationSeconds || 30}
                       />
                     ))}
                   </SortableContext>
                 </DndContext>
                 {editingPlaylist.items.length > 0 && (
-                  <Button 
-                    variant="outline" 
-                    className="w-full border-dashed border-amber-300 bg-amber-50/50 text-amber-700 hover:bg-amber-50 hover:text-amber-800"
-                    onClick={() => setEditingPlaylist({
-                      ...editingPlaylist,
-                      items: [...editingPlaylist.items, { id: `ad-break-${Date.now()}`, isAdBreak: true }]
-                    })}
-                  >
-                    <Plus className="mr-2 h-4 w-4" />
-                    Insert Ad Break
-                  </Button>
+                  <div className="flex flex-col gap-2">
+                    <div className="flex items-center gap-2 w-full">
+                      <Button 
+                        variant="outline" 
+                        className="flex-1 border-dashed border-amber-300 bg-amber-50/50 text-amber-700 hover:bg-amber-50 hover:text-amber-800"
+                        onClick={() => setEditingPlaylist({
+                          ...editingPlaylist,
+                          items: [...editingPlaylist.items, { id: `ad-break-${Date.now()}`, isAdBreak: true, duration: adSettings?.breakDurationSeconds || 30 }]
+                        })}
+                      >
+                        <Plus className="mr-2 h-4 w-4" />
+                        Insert Ad Break
+                      </Button>
+                      <div className="flex gap-1">
+                        {[15, 30, 60, 90, 120].map(d => (
+                          <Button
+                            key={d}
+                            size="sm"
+                            variant="outline"
+                            className={cn("h-9 px-2 text-xs", (adSettings?.breakDurationSeconds || 30) === d ? "bg-amber-100 border-amber-400 text-amber-900" : "border-amber-200 text-amber-700")}
+                            onClick={() => setEditingPlaylist({
+                              ...editingPlaylist,
+                              items: [...editingPlaylist.items, { id: `ad-break-${Date.now()}`, isAdBreak: true, duration: d }]
+                            })}
+                          >
+                            {d}s
+                          </Button>
+                        ))}
+                      </div>
+                    </div>
+                  </div>
                 )}
                 {editingPlaylist.items.length === 0 && (
                   <div className="text-center py-12 text-zinc-500 border-2 border-dashed border-zinc-200 rounded-lg">

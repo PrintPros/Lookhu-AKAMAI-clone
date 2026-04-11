@@ -25,13 +25,12 @@ export function EmbedOptions({ profile }: EmbedOptionsProps) {
   const [adSettings, setAdSettings] = useState<any>(null);
 
   useEffect(() => {
-    const fetchAdSettings = async () => {
-      const snap = await getDoc(doc(db, "settings", "ads"));
+    const unsubscribe = onSnapshot(doc(db, "settings", "ads"), (snap) => {
       if (snap.exists()) {
         setAdSettings(snap.data());
       }
-    };
-    fetchAdSettings();
+    });
+    return () => unsubscribe();
   }, []);
 
   useEffect(() => {
@@ -101,7 +100,7 @@ export function EmbedOptions({ profile }: EmbedOptionsProps) {
 
   const embedCode = `<div style="position:relative;padding-bottom:56.25%;height:0;overflow:hidden;max-width:100%;">
   <iframe 
-    src="https://fastfasts-embed-worker.lookhu.workers.dev/?worker=${encodeURIComponent(selectedChannel?.workerManifestUrl?.replace(/\/(index|live)\.m3u8$/, '') || '')}&name=${encodeURIComponent(selectedChannel?.name || 'FastFasts')}&autoplay=${settings.autoPlay ?? true}&muted=${settings.muted ?? true}&controls=${settings.controls ?? true}&adsEnabled=${adSettings?.enabled ?? false}&preRollUrl=${encodeURIComponent(adSettings?.preRollUrl || '')}&midRollUrl=${encodeURIComponent(adSettings?.midRollUrl || '')}&channelId=${selectedChannelId}" 
+    src="https://fastfasts-embed-worker.lookhu.workers.dev/?worker=${encodeURIComponent(selectedChannel?.workerManifestUrl?.replace(/\/(index|live)\.m3u8$/, '') || '')}&name=${encodeURIComponent(selectedChannel?.name || 'FastFasts')}&autoplay=${settings.autoPlay ?? true}&muted=${settings.muted ?? true}&controls=${settings.controls ?? true}&adsEnabled=${adSettings?.enabled ?? false}&preRollUrl=${encodeURIComponent(adSettings?.preRollUrl || '')}&midRollUrl=${encodeURIComponent(adSettings?.midRollUrl || '')}&channelId=${selectedChannelId}&useFallback=${adSettings?.useFallback ?? false}&forceFrequency=${adSettings?.forceFrequency ?? 0}&houseAds=${encodeURIComponent(JSON.stringify(adSettings?.houseAds || []))}&breakDurationSeconds=${adSettings?.breakDurationSeconds ?? 30}&adPodSize=${adSettings?.adPodSize ?? 1}" 
     style="position:absolute;top:0;left:0;width:100%;height:100%;border:0;" 
     allowfullscreen
   ></iframe>

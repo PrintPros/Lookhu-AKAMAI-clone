@@ -28,6 +28,7 @@ import {
 } from "lucide-react";
 import { motion } from "framer-motion";
 import { handleFirestoreError, OperationType } from "../lib/firestore-errors";
+import { toast } from "sonner";
 
 export function AdSettings() {
   const [config, setConfig] = useState<AdConfig>({
@@ -87,6 +88,25 @@ export function AdSettings() {
   const handleUploadHouseAd = async (file: File) => {
     setSaving(true);
     try {
+      // 0. Read duration via temporary video element
+      const duration = await new Promise<number>((resolve, reject) => {
+        const video = document.createElement('video');
+        video.preload = 'metadata';
+        video.onloadedmetadata = () => {
+          URL.revokeObjectURL(video.src);
+          resolve(video.duration);
+        };
+        video.onerror = () => reject(new Error("Failed to read video duration"));
+        video.src = URL.createObjectURL(file);
+      });
+
+      const breakDur = config.breakDurationSeconds || 30;
+      if (Math.abs(duration - breakDur) > 2) {
+        toast.error(`House ad must be approximately ${breakDur} seconds (15, 30, or 60) to match broadcast standards. This file is ${duration.toFixed(1)} seconds.`);
+        setSaving(false);
+        return;
+      }
+
       // 1. Get active bucket config
       const cfQ = query(
         collection(db, "cloudflareConfigs"),
@@ -147,7 +167,8 @@ export function AdSettings() {
         name: file.name,
         type: 'promo',
         url: `${cfData.publicBaseUrl}/${mp4Key}`,
-        duration: 0, 
+        duration: duration, 
+
         weight: 5
       };
       setConfig({ ...config, houseAds: [...(config.houseAds || []), newAd] });

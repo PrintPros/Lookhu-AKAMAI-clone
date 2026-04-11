@@ -126,7 +126,7 @@ async function handlePlaylist(request, env, ctx, corsHeaders) {
       if (isProgramBoundary) {
         playlist += '#EXT-X-DISCONTINUITY\n';
         if (lastProgram.adBreakAfter && manifest.adConfig?.enabled) {
-          const breakDuration = manifest.adConfig.breakDurationSeconds || 30;
+          const breakDuration = lastProgram.breakDurationSeconds || manifest.adConfig.breakDurationSeconds || 30;
           const breakId = `ad-break-${lastProgram.id}-${seq}`;
           playlist += `#EXT-X-DATERANGE:ID="${breakId}",START-DATE="${new Date().toISOString()}",DURATION=${breakDuration},SCTE35-OUT=0xFC00\n`;
           playlist += `#EXT-X-CUE-OUT:${breakDuration}\n`;

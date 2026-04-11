@@ -46,6 +46,8 @@ workerUrl = workerUrl.replace(/\/(index|live)\.m3u8$/, '');
     const useFallback = params.get('useFallback') === 'true';
     const forceFrequency = parseInt(params.get('forceFrequency') || '0');
     const houseAds = JSON.parse(params.get('houseAds') || '[]');
+    const breakDurationSeconds = parseInt(params.get('breakDurationSeconds') || '30');
+    const adPodSize = parseInt(params.get('adPodSize') || '1');
     let breakCounter = 0;
 
     const video = document.getElementById('video');
@@ -59,17 +61,52 @@ workerUrl = workerUrl.replace(/\/(index|live)\.m3u8$/, '');
 
     // IMA SDK
     let adsManager, adsLoader, adDisplayContainer;
+    let slotStartTime = 0;
+    let attemptCount = 0;
+
+    function fillVastMacros(url, perBreakDuration = breakDurationSeconds) {
+      if (!url) return url;
+      const nowData = window.lastNowData || {};
+      const title = encodeURIComponent(nowData.title || nowData.songTitle || '');
+      const genre = encodeURIComponent(nowData.artist || nowData.artistName || '');
+      
+      let replaced = url
+        .replace(/(\{\{|%7B%7B)CACHEBUSTER(\}\}|%7D%7D)/gi, Date.now())
+        .replace(/(\{\{|%7B%7B)USER_AGENT(\}\}|%7D%7D)/gi, encodeURIComponent(navigator.userAgent))
+        .replace(/(\{\{|%7B%7B)APP_NAME(\}\}|%7D%7D)/gi, encodeURIComponent(channelName))
+        .replace(/(\{\{|%7B%7B)CHANNEL_NAME(\}\}|%7D%7D)/gi, encodeURIComponent(channelName))
+        .replace(/(\{\{|%7B%7B)APP_BUNDLE(\}\}|%7D%7D)/gi, 'com.fastfasts.web')
+        .replace(/(\{\{|%7B%7B)CONTENT_TITLE(\}\}|%7D%7D)/gi, title)
+        .replace(/(\{\{|%7B%7B)CONTENT_GENRE(\}\}|%7D%7D)/gi, genre)
+        .replace(/(\{\{|%7B%7B)CONTENT_LIVESTREAM(\}\}|%7D%7D)/gi, '1')
+        .replace(/(\{\{|%7B%7B)LANGUAGE(\}\}|%7D%7D)/gi, 'en')
+        .replace(/(\{\{|%7B%7B)COPPA(\}\}|%7D%7D)/gi, '0')
+        .replace(/(\{\{|%7B%7B)LMT(\}\}|%7D%7D)/gi, '0')
+        .replace(/(\{\{|%7B%7B)GDPR(\}\}|%7D%7D)/gi, '0')
+        .replace(/(\{\{|%7B%7B)POD_MAX_DUR(\}\}|%7D%7D)/gi, perBreakDuration);
+        
+      return replaced.replace(/(%7B%7B|\{\{)[A-Z]+(%7D%7D|\}\})/g, '');
+    }
+
     function initializeIMA() {
       adDisplayContainer = new google.ima.AdDisplayContainer(adContainer, video);
       adsLoader = new google.ima.AdsLoader(adDisplayContainer);
       adsLoader.addEventListener(google.ima.AdsManagerLoadedEvent.Type.ADS_MANAGER_LOADED, onAdsManagerLoaded, false);
       adsLoader.addEventListener(google.ima.AdErrorEvent.Type.AD_ERROR, onAdError, false);
     }
-    function requestAds(vastUrl) {
+    let currentBreakDuration = breakDurationSeconds;
+    function requestAds(vastUrl, isMidRoll = false, perBreakDuration = breakDurationSeconds) {
       if (!vastUrl) return;
+      currentBreakDuration = perBreakDuration;
+      if (isMidRoll) {
+        if (attemptCount === 0) slotStartTime = Date.now();
+        attemptCount++;
+      } else {
+        attemptCount = 0;
+      }
       adDisplayContainer.initialize();
       const adsRequest = new google.ima.AdsRequest();
-      adsRequest.adTagUrl = vastUrl;
+      adsRequest.adTagUrl = fillVastMacros(vastUrl, perBreakDuration);
       adsRequest.linearAdSlotWidth = video.clientWidth;
       adsRequest.linearAdSlotHeight = video.clientHeight;
       adsLoader.requestAds(adsRequest);
@@ -89,7 +126,13 @@ workerUrl = workerUrl.replace(/\/(index|live)\.m3u8$/, '');
       });
       adsManager.addEventListener(google.ima.AdEvent.Type.ALL_ADS_COMPLETED, () => {
         adContainer.style.display = 'none';
-        video.play().catch(() => {});
+        const timeUsed = (Date.now() - slotStartTime) / 1000;
+        if (attemptCount > 0 && timeUsed < currentBreakDuration - 13 && attemptCount < adPodSize) {
+          requestAds(midRollUrl, true, currentBreakDuration);
+        } else {
+          attemptCount = 0;
+          video.play().catch(() => {});
+        }
       });
       try {
         adsManager.init(video.clientWidth, video.clientHeight, google.ima.ViewMode.NORMAL);
@@ -103,20 +146,33 @@ workerUrl = workerUrl.replace(/\/(index|live)\.m3u8$/, '');
       console.error('IMA error', adErrorEvent.getError());
       if (adsManager) adsManager.destroy();
       adContainer.style.display = 'none';
-      if (useFallback && houseAds.length > 0) {
-        playHouseAd();
+      
+      const timeUsed = attemptCount > 0 ? (Date.now() - slotStartTime) / 1000 : 0;
+      const remainingSeconds = currentBreakDuration - timeUsed;
+      
+      if (useFallback && houseAds.length > 0 && remainingSeconds >= 13) {
+        playHouseAd(remainingSeconds);
       } else {
+        attemptCount = 0;
         video.play().catch(() => {});
       }
     }
 
-    function playHouseAd() {
+    function playHouseAd(remainingSeconds = breakDurationSeconds) {
       if (houseAds.length === 0) return;
+      
+      const validAds = houseAds.filter(ad => ad.duration <= remainingSeconds + 2);
+      if (validAds.length === 0) {
+        attemptCount = 0;
+        video.play().catch(() => {});
+        return;
+      }
+      
       // Weighted random
-      const totalWeight = houseAds.reduce((sum, ad) => sum + ad.weight, 0);
+      const totalWeight = validAds.reduce((sum, ad) => sum + ad.weight, 0);
       let random = Math.random() * totalWeight;
-      let selectedAd = houseAds[0];
-      for (const ad of houseAds) {
+      let selectedAd = validAds[0];
+      for (const ad of validAds) {
         if (random < ad.weight) {
           selectedAd = ad;
           break;
@@ -141,7 +197,13 @@ workerUrl = workerUrl.replace(/\/(index|live)\.m3u8$/, '');
       adVideo.addEventListener('ended', () => {
         adContainer.removeChild(adVideo);
         adContainer.style.display = 'none';
-        video.play().catch(() => {});
+        const timeRemaining = remainingSeconds - selectedAd.duration;
+        if (timeRemaining >= 13) {
+          playHouseAd(timeRemaining);
+        } else {
+          attemptCount = 0;
+          video.play().catch(() => {});
+        }
       });
     }
 
@@ -179,11 +241,13 @@ workerUrl = workerUrl.replace(/\/(index|live)\.m3u8$/, '');
             if (dr.id?.startsWith('ad-break-') && !servedBreaks.has(dr.id)) {
               servedBreaks.add(dr.id);
               console.log('Mid-roll triggered for break:', dr.id);
+              const perBreakDuration = dr.duration || breakDurationSeconds;
               breakCounter++;
               if (forceFrequency > 0 && breakCounter % forceFrequency === 0) {
-                playHouseAd();
+                playHouseAd(perBreakDuration);
               } else {
-                requestAds(midRollUrl);
+                attemptCount = 0;
+                requestAds(midRollUrl, true, perBreakDuration);
               }
             }
           }
@@ -221,6 +285,7 @@ workerUrl = workerUrl.replace(/\/(index|live)\.m3u8$/, '');
       function updateNow() {
         fetch(nowUrl).then(r => r.json()).then(data => {
           const np = data.now || data;
+          window.lastNowData = np;
           const artist = np.artist || np.artistName || '';
           const title = np.title || np.songTitle || '';
           document.getElementById('nowPlaying').textContent = 

@@ -56,6 +56,7 @@ export function buildManifest(
     // Check if the next item is an ad break
     const nextItem = playlist.items[i + 1];
     const adBreakAfter = !!nextItem?.isAdBreak;
+    const breakDurationSeconds = adBreakAfter ? (nextItem.duration || adConfig.breakDurationSeconds) : undefined;
 
     programs.push({
       id: (m.artistName && m.songTitle)
@@ -67,7 +68,8 @@ export function buildManifest(
       segments: m.segmentCount || 0,
       prefix: m.segmentPrefix || "segment_",
       pad: m.segmentPad || 4,
-      adBreakAfter
+      adBreakAfter,
+      breakDurationSeconds
     });
   }
 
