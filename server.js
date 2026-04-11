@@ -304,14 +304,14 @@ async function handlePlaylist(request, env, ctx, corsHeaders) {
       const flatIndex = ((seq % totalSegments) + totalSegments) % totalSegments;
       const { program, segIndex } = allSegments[flatIndex];
 
-      // Add discontinuity and date-time at program boundaries
-      if (lastProgram !== null && program.id !== lastProgram.id) {
-        playlist += "#EXT-X-DISCONTINUITY\\n";
-        
-        // Add SCTE marker if ad break is needed
+      // Detect program boundary
+      const isProgramBoundary = lastProgram !== null && program.id !== lastProgram.id;
+      if (isProgramBoundary) {
+        playlist += '#EXT-X-DISCONTINUITY\\n';
         if (lastProgram.adBreakAfter && manifest.adConfig?.enabled) {
           const breakDuration = manifest.adConfig.breakDurationSeconds || 30;
-          playlist += \`#EXT-X-DATERANGE:ID="ad-break-\${lastProgram.id}-\${seq}",START-DATE="\${new Date().toISOString()}",DURATION=\${breakDuration},SCTE35-CMD=0xFC00\\n\`;
+          const breakId = \`ad-break-\${lastProgram.id}-\${seq}\`;
+          playlist += \`#EXT-X-DATERANGE:ID="\${breakId}",START-DATE="\${new Date().toISOString()}",DURATION=\${breakDuration},SCTE35-OUT=0xFC00\\n\`;
           playlist += \`#EXT-X-CUE-OUT:\${breakDuration}\\n\`;
         }
       }
