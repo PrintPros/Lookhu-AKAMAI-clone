@@ -197,7 +197,8 @@ workerUrl = workerUrl.replace(/\/(index|live)\.m3u8$/, '');
       adVideo.addEventListener('ended', () => {
         adContainer.removeChild(adVideo);
         adContainer.style.display = 'none';
-        const timeRemaining = remainingSeconds - selectedAd.duration;
+        const adActualDuration = selectedAd.duration > 0 ? selectedAd.duration : remainingSeconds;
+        const timeRemaining = remainingSeconds - adActualDuration;
         if (timeRemaining >= 13) {
           playHouseAd(timeRemaining);
         } else {

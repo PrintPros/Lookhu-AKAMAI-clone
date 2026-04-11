@@ -343,6 +343,29 @@ async function startServer() {
     }
   });
 
+  app.post("/api/r2/delete-file", async (req, res) => {
+    const authHeader = req.headers.authorization;
+    if (!authHeader || !authHeader.startsWith("Bearer ")) {
+      return res.status(401).json({ error: "Unauthorized" });
+    }
+    const idToken = authHeader.split("Bearer ")[1];
+    if (!idToken || idToken.length < 20) {
+      return res.status(401).json({ error: "Invalid token" });
+    }
+
+    const { accountId, r2AccessKeyId, r2SecretAccessKey, bucketName, key } = req.body;
+    if (!accountId || !r2AccessKeyId || !r2SecretAccessKey || !bucketName || !key) {
+      return res.status(400).json({ error: "Missing fields" });
+    }
+    try {
+      const r2 = createR2Client(accountId, r2AccessKeyId, r2SecretAccessKey);
+      await r2.send(new DeleteObjectCommand({ Bucket: bucketName, Key: key }));
+      res.json({ success: true });
+    } catch (err: any) {
+      res.status(500).json({ success: false, error: err.message });
+    }
+  });
+
   app.post("/api/r2/presign-secure", async (req, res) => {
     const authHeader = req.headers.authorization;
     if (!authHeader || !authHeader.startsWith("Bearer ")) {

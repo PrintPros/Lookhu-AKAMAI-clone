@@ -89,20 +89,28 @@ export function AdSettings() {
     setSaving(true);
     try {
       // 0. Read duration via temporary video element
+      const videoEl = document.createElement('video');
+      videoEl.preload = 'metadata';
+      videoEl.src = URL.createObjectURL(file);
       const duration = await new Promise<number>((resolve, reject) => {
-        const video = document.createElement('video');
-        video.preload = 'metadata';
-        video.onloadedmetadata = () => {
-          URL.revokeObjectURL(video.src);
-          resolve(video.duration);
+        videoEl.onloadedmetadata = () => {
+          const d = videoEl.duration;
+          URL.revokeObjectURL(videoEl.src);
+          if (!isFinite(d) || isNaN(d) || d <= 0) reject(new Error('Could not read duration'));
+          else resolve(d);
         };
-        video.onerror = () => reject(new Error("Failed to read video duration"));
-        video.src = URL.createObjectURL(file);
+        videoEl.onerror = () => reject(new Error('Failed to load metadata'));
+        setTimeout(() => reject(new Error('Timeout')), 10000);
       });
 
-      const breakDur = config.breakDurationSeconds || 30;
-      if (Math.abs(duration - breakDur) > 2) {
-        toast.error(`House ad must be approximately ${breakDur} seconds (15, 30, or 60) to match broadcast standards. This file is ${duration.toFixed(1)} seconds.`);
+      // Validate duration matches break duration ± 2 seconds
+      const expectedDuration = config.breakDurationSeconds || 30;
+      if (Math.abs(duration - expectedDuration) > 2) {
+        const validDurations = [15, 30, 60, 90, 120];
+        const closest = validDurations.reduce((prev, curr) => 
+          Math.abs(curr - duration) < Math.abs(prev - duration) ? curr : prev
+        );
+        toast.error(`House ad must be approximately ${expectedDuration}s to match your break duration. This file is ${duration.toFixed(1)}s. Standard durations are 15, 30, or 60 seconds. Closest standard: ${closest}s.`);
         setSaving(false);
         return;
       }
@@ -165,10 +173,9 @@ export function AdSettings() {
       const newAd = {
         id: Date.now().toString(),
         name: file.name,
-        type: 'promo',
+        type: 'promo' as const,
         url: `${cfData.publicBaseUrl}/${mp4Key}`,
         duration: duration, 
-
         weight: 5
       };
       setConfig({ ...config, houseAds: [...(config.houseAds || []), newAd] });
@@ -176,6 +183,55 @@ export function AdSettings() {
     } catch (error) {
       console.error(error);
       setMessage({ type: "error", text: "Failed to upload house ad." });
+    } finally {
+      setSaving(false);
+    }
+  };
+
+  const handleRemoveHouseAd = async (index: number) => {
+    const adToRemove = config.houseAds?.[index];
+    if (!adToRemove) return;
+
+    setSaving(true);
+    try {
+      // 1. Get active bucket config
+      const cfQ = query(
+        collection(db, "cloudflareConfigs"),
+        where("userId", "==", auth.currentUser?.uid),
+        where("isActive", "==", true),
+        limit(1)
+      );
+      const cfSnap = await getDocs(cfQ);
+      if (!cfSnap.empty) {
+        const cfData = cfSnap.docs[0].data();
+        const idToken = await auth.currentUser!.getIdToken();
+        
+        // Extract key from URL
+        const urlParts = adToRemove.url.split("/");
+        const key = `house-ads/${urlParts[urlParts.length - 1]}`;
+
+        await fetch("/api/r2/delete-file", {
+          method: "POST",
+          headers: {
+            "Content-Type": "application/json",
+            "Authorization": `Bearer ${idToken}`,
+          },
+          body: JSON.stringify({
+            accountId: cfData.accountId,
+            r2AccessKeyId: cfData.r2AccessKeyId,
+            r2SecretAccessKey: cfData.r2SecretAccessKey,
+            bucketName: cfData.bucketName,
+            key
+          }),
+        });
+      }
+
+      const newAds = (config.houseAds || []).filter((_, i) => i !== index);
+      setConfig({ ...config, houseAds: newAds });
+      setMessage({ type: "success", text: "House ad removed." });
+    } catch (error) {
+      console.error(error);
+      setMessage({ type: "error", text: "Failed to remove house ad." });
     } finally {
       setSaving(false);
     }
@@ -384,10 +440,7 @@ export function AdSettings() {
                 <Button 
                   variant="ghost" 
                   size="sm"
-                  onClick={() => {
-                    const newAds = (config.houseAds || []).filter((_, i) => i !== index);
-                    setConfig({ ...config, houseAds: newAds });
-                  }}
+                  onClick={() => handleRemoveHouseAd(index)}
                 >
                   Delete
                 </Button>
