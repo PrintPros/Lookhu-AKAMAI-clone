@@ -126,12 +126,13 @@ async function handlePlaylist(request, env, ctx, corsHeaders) {
       // Add discontinuity and date-time at program boundaries
       if (lastProgram !== null && program.id !== lastProgram.id) {
         playlist += "#EXT-X-DISCONTINUITY\\n";
-      }
-
-      // Add SCTE marker if ad break is needed
-      if (program.adBreakAfter && manifest.adConfig?.enabled) {
-        const breakDuration = manifest.adConfig.breakDurationSeconds || 30;
-        playlist += \`#EXT-X-DATERANGE:ID="ad-break-\${Date.now()}",START-DATE="\${new Date().toISOString()}",DURATION=\${breakDuration},SCTE35-CMD=0xFC00\\n\`;
+        
+        // Add SCTE marker if ad break is needed
+        if (lastProgram.adBreakAfter && manifest.adConfig?.enabled) {
+          const breakDuration = manifest.adConfig.breakDurationSeconds || 30;
+          playlist += \`#EXT-X-DATERANGE:ID="ad-break-\${lastProgram.id}-\${seq}",START-DATE="\${new Date().toISOString()}",DURATION=\${breakDuration},SCTE35-CMD=0xFC00\\n\`;
+          playlist += \`#EXT-X-CUE-OUT:\${breakDuration}\\n\`;
+        }
       }
 
       const pad = program.pad || 4;
