@@ -39,8 +39,9 @@ try {
     if (!firebaseConfig.projectId) {
       console.error("Firebase Admin initialization failed: projectId is missing in firebase-applet-config.json");
     } else {
+      // Explicitly initialize with project ID to ensure it picks up the correct project
       adminApp = initializeApp({ projectId: firebaseConfig.projectId });
-      console.log("Firebase Admin initialized with project:", firebaseConfig.projectId);
+      console.log("Firebase Admin initialized with project ID:", firebaseConfig.projectId);
     }
   } else {
     adminApp = apps[0];
@@ -712,17 +713,24 @@ async function startServer() {
 
       // 6. Save to Firestore via Admin SDK
       if (mediaId && dbAdmin) {
-        await dbAdmin.collection("media").doc(mediaId).set({
-          status: "ready",
-          m3u8Url: `${publicBaseUrl}/streams/${videoId}/index.m3u8`,
-          segmentCount,
-          duration,
-          segmentDuration: 6,
-          segmentPrefix: "segment_",
-          segmentPad: 4,
-          r2Path: `streams/${videoId}`,
-          bucketName,
-        }, { merge: true });
+        console.log("Attempting Firestore write to media/", mediaId, "with dbAdmin:", !!dbAdmin);
+        try {
+          await dbAdmin.collection("media").doc(mediaId).set({
+            status: "ready",
+            m3u8Url: `${publicBaseUrl}/streams/${videoId}/index.m3u8`,
+            segmentCount,
+            duration,
+            segmentDuration: 6,
+            segmentPrefix: "segment_",
+            segmentPad: 4,
+            r2Path: `streams/${videoId}`,
+            bucketName,
+          }, { merge: true });
+          console.log("Firestore write successful");
+        } catch (e) {
+          console.error("Firestore write failed:", e);
+          throw e;
+        }
       } else {
         console.warn("Skipping Firestore update — dbAdmin unavailable or no mediaId");
       }

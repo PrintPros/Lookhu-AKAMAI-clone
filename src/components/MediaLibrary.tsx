@@ -180,8 +180,72 @@ export function MediaLibrary({ profile }: { profile: any }) {
         setTranscodeMessage("Encoding locally (this may take a while)...");
         const { encodeVideoLocally } = await import("../lib/videoEncoder");
         const { playlist, segments } = await encodeVideoLocally(selectedFile, (p) => setTranscodeProgress(p));
-        // TODO: Upload segments and playlist to R2
-        toast.success("Local encoding complete!");
+        
+        setTranscodeMessage("Uploading encoded segments...");
+        // Get upload URLs for segments and playlist
+        const idToken = await auth.currentUser!.getIdToken();
+        const videoId = `${Date.now()}-${(uploadMetadata.artistName || "unknown").toLowerCase().replace(/[^a-z0-9]/g, "-").slice(0, 20)}`;
+        
+        // Find active config
+        const cfQ = query(
+          collection(db, "cloudflareConfigs"),
+          where("userId", "==", auth.currentUser!.uid),
+          where("isActive", "==", true),
+          limit(1)
+        );
+        const cfSnap = await getDocs(cfQ);
+        if (cfSnap.empty) throw new Error("No active R2 bucket connected.");
+        const config = cfSnap.docs[0].data();
+
+        // 1. Create placeholder
+        const mediaRef = await addDoc(collection(db, "media"), {
+          ...uploadMetadata,
+          status: "uploading",
+          userId: auth.currentUser!.uid,
+          createdAt: new Date().toISOString(),
+          bucketName: config.bucketName,
+          r2Path: `streams/${videoId}`,
+          videoId,
+          m3u8Url: "",
+          segmentCount: segments.length,
+          duration: duration,
+        });
+
+        // 2. Get presigned URLs
+        const keys = [{ key: `streams/${videoId}/index.m3u8`, contentType: "application/x-mpegURL" }, ...segments.map(s => ({ key: `streams/${videoId}/${s.name}`, contentType: "video/MP2T" }))];
+        const presignResp = await fetch("/api/r2/presign-secure", {
+          method: "POST",
+          headers: { "Content-Type": "application/json", "Authorization": `Bearer ${idToken}` },
+          body: JSON.stringify({
+            configId: cfSnap.docs[0].id,
+            accountId: config.accountId,
+            r2AccessKeyId: config.r2AccessKeyId,
+            r2SecretAccessKey: config.r2SecretAccessKey,
+            bucketName: config.bucketName,
+            keys
+          }),
+        });
+        if (!presignResp.ok) throw new Error("Failed to get upload URLs");
+        const { urls } = await presignResp.json();
+
+        // 3. Upload playlist and segments
+        const playlistUrl = urls.find((u: any) => u.key.endsWith('index.m3u8')).uploadUrl;
+        await fetch(playlistUrl, { method: "PUT", body: playlist, headers: { "Content-Type": "application/x-mpegURL" } });
+
+        for (const seg of segments) {
+          const uploadUrl = urls.find((u: any) => u.key.endsWith(seg.name)).uploadUrl;
+          await fetch(uploadUrl, { method: "PUT", body: seg.data, headers: { "Content-Type": "video/MP2T" } });
+        }
+
+        // 4. Update status
+        await updateDoc(doc(db, "media", mediaRef.id), {
+          status: "ready",
+          m3u8Url: `${config.publicBaseUrl}/streams/${videoId}/index.m3u8`
+        });
+
+        toast.success("Local encoding and upload complete!");
+        setTranscodePhase("done");
+        return; // Skip standard upload
       }
 
       await uploadVideoToR2(
