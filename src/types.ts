@@ -58,10 +58,16 @@ export interface Channel {
   epoch?: number; // Unix timestamp (seconds) when the loop started
 }
 
+export interface PlaylistItem {
+  id: string; // unique ID
+  mediaId?: string;
+  isAdBreak?: boolean;
+}
+
 export interface Playlist {
   id: string;
   name: string;
-  mediaIds: string[];
+  items: PlaylistItem[];
   createdAt: string;
   userId: string;
   genre?: string;
@@ -135,7 +141,8 @@ export interface AdConfig {
   id: string;
   preRollUrl: string;
   midRollUrl: string;
-  midRollFrequency: number;
+  adPodSize: number;
+  breakDurationSeconds: number;
   enabled: boolean;
   label?: string;
 }
@@ -148,6 +155,7 @@ export interface ManifestProgram {
   segments: number;
   prefix: string;
   pad: number;
+  adBreakAfter?: boolean;
 }
 
 export interface ChannelManifest {
@@ -156,6 +164,11 @@ export interface ChannelManifest {
   window: number;
   updatedAt: string;
   programs: ManifestProgram[];
+  adConfig: {
+    enabled: boolean;
+    adPodSize: number;
+    breakDurationSeconds: number;
+  };
 }
 
 export interface ScheduledPublish {

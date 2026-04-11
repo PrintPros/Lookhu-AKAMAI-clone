@@ -100,17 +100,18 @@ export function EmbedPlayer({ channelId, skin: skinProp }: EmbedPlayerProps) {
           const pData = { ...playlistDoc.data(), id: playlistDoc.id } as Playlist;
           setPlaylist(pData);
 
-          if (pData.mediaIds && pData.mediaIds.length > 0) {
+          if (pData.items && pData.items.length > 0) {
             // 3. Fetch Media Items
             const mediaPromises = [];
-            for (let i = 0; i < pData.mediaIds.length; i += 10) {
-              const chunk = pData.mediaIds.slice(i, i + 10);
+            const mediaIds = pData.items.map(i => i.mediaId).filter(Boolean) as string[];
+            for (let i = 0; i < mediaIds.length; i += 10) {
+              const chunk = mediaIds.slice(i, i + 10);
               const q = query(collection(db, "media"), where("__name__", "in", chunk));
               mediaPromises.push(getDocs(q));
             }
             const snapshots = await Promise.all(mediaPromises);
             const fetchedMedia = snapshots.flatMap(snap => snap.docs.map(d => ({ id: d.id, ...d.data() } as Media)));
-            const sortedMedia = (pData.mediaIds || []).map(id => fetchedMedia.find(item => item.id === id)).filter(Boolean) as Media[];
+            const sortedMedia = mediaIds.map(id => fetchedMedia.find(item => item.id === id)).filter(Boolean) as Media[];
             setMediaItems(sortedMedia);
           }
         }

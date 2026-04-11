@@ -818,7 +818,8 @@ async function startServer() {
           if (!activeConfig) throw new Error("No active Cloudflare config");
 
           // 5. Build Manifest
-          const manifest = buildManifest(channel, playlist, mediaItems, cfConfigs);
+          const adConfig = channel.adConfig || { enabled: false, adPodSize: 2, breakDurationSeconds: 30 };
+          const manifest = buildManifest(channel, playlist, mediaItems, cfConfigs, adConfig);
           const validation = validateManifest(manifest);
           if (!validation.valid) throw new Error(`Invalid manifest: ${validation.errors.join(", ")}`);
 
@@ -976,7 +977,8 @@ export default {
       if (!manifestSettings?.r2AccessKeyId) throw new Error("Manifest bucket not configured in Settings");
 
       // Build manifest from data sent by browser
-      const manifest = buildManifest(channel, playlist, mediaItems || [], [cfConfig]);
+      const adConfig = channel.adConfig || { enabled: false, adPodSize: 2, breakDurationSeconds: 30 };
+      const manifest = buildManifest(channel, playlist, mediaItems || [], [cfConfig], adConfig);
       const validation = validateManifest(manifest);
       if (!validation.valid) {
         return res.status(400).json({ error: `Invalid manifest: ${validation.errors.join(", ")}` });

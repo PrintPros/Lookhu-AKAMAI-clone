@@ -128,6 +128,12 @@ async function handlePlaylist(request, env, ctx, corsHeaders) {
         playlist += "#EXT-X-DISCONTINUITY\\n";
       }
 
+      // Add SCTE marker if ad break is needed
+      if (program.adBreakAfter && manifest.adConfig?.enabled) {
+        const breakDuration = manifest.adConfig.breakDurationSeconds || 30;
+        playlist += \`#EXT-X-DATERANGE:ID="ad-break-\${Date.now()}",START-DATE="\${new Date().toISOString()}",DURATION=\${breakDuration},SCTE35-CMD=0xFC00\\n\`;
+      }
+
       const pad = program.pad || 4;
       const prefix = program.prefix || "segment_";
       const segNum = segIndex.toString().padStart(pad, "0");

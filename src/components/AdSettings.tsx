@@ -29,7 +29,8 @@ export function AdSettings() {
     id: "global",
     preRollUrl: "",
     midRollUrl: "",
-    midRollFrequency: 3,
+    adPodSize: 3,
+    breakDurationSeconds: 30,
     enabled: false
   });
   const [loading, setLoading] = useState(true);
@@ -42,7 +43,12 @@ export function AdSettings() {
         const docRef = doc(db, "settings", "ads");
         const docSnap = await getDoc(docRef);
         if (docSnap.exists()) {
-          setConfig(docSnap.data() as AdConfig);
+          const data = docSnap.data();
+          setConfig({
+            ...data,
+            adPodSize: data.adPodSize || (data as any).midRollFrequency || 3,
+            breakDurationSeconds: data.breakDurationSeconds || 30,
+          } as AdConfig);
         }
         setLoading(false);
       } catch (error) {
@@ -169,20 +175,31 @@ export function AdSettings() {
               />
             </div>
 
-            <div className="space-y-2">
-              <label className="text-xs font-bold text-zinc-500 uppercase tracking-wider">Frequency</label>
-              <div className="flex items-center gap-3">
+            <div className="grid grid-cols-2 gap-4">
+              <div className="space-y-2">
+                <label className="text-xs font-bold text-zinc-500 uppercase tracking-wider">Ads per break (pod size)</label>
                 <Input 
                   type="number"
                   min={1}
                   max={20}
-                  value={config.midRollFrequency || 3}
-                  onChange={(e) => setConfig({ ...config, midRollFrequency: parseInt(e.target.value) })}
-                  className="w-24 bg-zinc-50 border-zinc-200"
+                  value={config.adPodSize || 3}
+                  onChange={(e) => setConfig({ ...config, adPodSize: parseInt(e.target.value) })}
+                  className="bg-zinc-50 border-zinc-200"
                 />
-                <span className="text-sm text-zinc-500">videos between ad breaks</span>
+              </div>
+              <div className="space-y-2">
+                <label className="text-xs font-bold text-zinc-500 uppercase tracking-wider">Break duration (sec)</label>
+                <Input 
+                  type="number"
+                  min={10}
+                  max={300}
+                  value={config.breakDurationSeconds || 30}
+                  onChange={(e) => setConfig({ ...config, breakDurationSeconds: parseInt(e.target.value) })}
+                  className="bg-zinc-50 border-zinc-200"
+                />
               </div>
             </div>
+            <p className="text-[10px] text-zinc-400">Ad break positions are set in the Playlists editor. This setting controls how many ads play during each break.</p>
           </div>
         </Card>
       </div>

@@ -12,6 +12,7 @@ import {
   getDocs,
   limit
 } from "firebase/firestore";
+import { v4 as uuidv4 } from "uuid";
 import { ArtistSubmission, Media, Playlist } from "../types";
 import { Button } from "./ui/Button";
 import { Card } from "./ui/Card";
@@ -161,7 +162,7 @@ export function ArtistSubmissions() {
         const playlistDoc = playlistSnap.docs[0];
         const playlistData = playlistDoc.data() as Playlist;
         await updateDoc(playlistDoc.ref, {
-          mediaIds: [...playlistData.mediaIds, mediaRef.id]
+          items: [...playlistData.items, { id: uuidv4(), mediaId: mediaRef.id, isAdBreak: false }]
         });
       }
     } catch (error) {

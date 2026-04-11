@@ -130,16 +130,17 @@ export function EPGViewer({ channelId, epgData: externalEpg, profile }: EPGViewe
               const pData = { id: playlistDoc.id, ...playlistDoc.data() } as Playlist;
               setPlaylist(pData);
               
-              if (pData.mediaIds && pData.mediaIds.length > 0) {
+              if (pData.items && pData.items.length > 0) {
                 const mediaPromises = [];
-                for (let i = 0; i < pData.mediaIds.length; i += 10) {
-                  const chunk = pData.mediaIds.slice(i, i + 10);
+                const mediaIds = pData.items.map(i => i.mediaId).filter(Boolean) as string[];
+                for (let i = 0; i < mediaIds.length; i += 10) {
+                  const chunk = mediaIds.slice(i, i + 10);
                   const q = query(collection(db, "media"), where("__name__", "in", chunk));
                   mediaPromises.push(getDocs(q));
                 }
                 const snapshots = await Promise.all(mediaPromises);
                 const fetchedMedia = snapshots.flatMap(snap => snap.docs.map(d => ({ id: d.id, ...d.data() } as Media)));
-                const sortedMedia = (pData.mediaIds || []).map(id => fetchedMedia.find(item => item.id === id)).filter(Boolean) as Media[];
+                const sortedMedia = mediaIds.map(id => fetchedMedia.find(item => item.id === id)).filter(Boolean) as Media[];
                 setMediaItems(sortedMedia);
               } else {
                 setMediaItems([]);
@@ -323,7 +324,7 @@ export function EPGViewer({ channelId, epgData: externalEpg, profile }: EPGViewe
                 <div className="divide-y divide-zinc-100">
                   {activeChannels.map(c => {
                     const p = playlists.find(pl => pl.id === c.playlistId);
-                    const mItems = (p?.mediaIds || []).map(id => allMedia.find(m => m.id === id)).filter(Boolean) as Media[];
+                    const mItems = (p?.items || []).map(item => allMedia.find(m => m.id === item.mediaId)).filter(Boolean) as Media[];
                     const epg = getDerivedEpg(p || null, mItems);
                     
                     // Filter programs that overlap with our grid window
@@ -384,7 +385,7 @@ export function EPGViewer({ channelId, epgData: externalEpg, profile }: EPGViewe
           <div className="grid gap-6">
             {activeChannels.map(c => {
             const p = playlists.find(pl => pl.id === c.playlistId);
-            const mItems = (p?.mediaIds || []).map(id => allMedia.find(m => m.id === id)).filter(Boolean) as Media[];
+            const mItems = (p?.items || []).map(item => allMedia.find(m => m.id === item.mediaId)).filter(Boolean) as Media[];
             const epg = getDerivedEpg(p || null, mItems);
             const { nowPlaying: now, comingUp: next } = getNowAndNext(epg);
 

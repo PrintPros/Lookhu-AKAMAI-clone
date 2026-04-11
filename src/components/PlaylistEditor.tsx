@@ -188,7 +188,7 @@ export function PlaylistEditor({ profile }: { profile: any }) {
     try {
       await addDoc(collection(db, "playlists"), {
         name: newPlaylistName,
-        mediaIds: [],
+        items: [],
         userId: auth.currentUser.uid,
         createdAt: new Date().toISOString(),
       });
@@ -204,7 +204,7 @@ export function PlaylistEditor({ profile }: { profile: any }) {
 
     try {
       await updateDoc(doc(db, "playlists", editingPlaylist.id), {
-        mediaIds: editingPlaylist.mediaIds,
+        items: editingPlaylist.items,
         name: editingPlaylist.name,
       });
       setEditingPlaylist(null);
@@ -225,17 +225,17 @@ export function PlaylistEditor({ profile }: { profile: any }) {
     if (!editingPlaylist) return;
     setEditingPlaylist({
       ...editingPlaylist,
-      mediaIds: [...editingPlaylist.mediaIds, mediaId],
+      items: [...editingPlaylist.items, { id: `${mediaId}-${Date.now()}`, mediaId }],
     });
   };
 
   const removeFromPlaylist = (index: number) => {
     if (!editingPlaylist) return;
-    const newMediaIds = [...editingPlaylist.mediaIds];
-    newMediaIds.splice(index, 1);
+    const newItems = [...editingPlaylist.items];
+    newItems.splice(index, 1);
     setEditingPlaylist({
       ...editingPlaylist,
-      mediaIds: newMediaIds,
+      items: newItems,
     });
   };
 
@@ -243,12 +243,12 @@ export function PlaylistEditor({ profile }: { profile: any }) {
     const { active, over } = event;
 
     if (editingPlaylist && over && active.id !== over.id) {
-      const oldIndex = editingPlaylist.mediaIds.indexOf(active.id as string);
-      const newIndex = editingPlaylist.mediaIds.indexOf(over.id as string);
+      const oldIndex = editingPlaylist.items.findIndex(i => i.id === active.id);
+      const newIndex = editingPlaylist.items.findIndex(i => i.id === over.id);
 
       setEditingPlaylist({
         ...editingPlaylist,
-        mediaIds: arrayMove(editingPlaylist.mediaIds, oldIndex, newIndex),
+        items: arrayMove(editingPlaylist.items, oldIndex, newIndex),
       });
     }
   };
@@ -315,36 +315,35 @@ export function PlaylistEditor({ profile }: { profile: any }) {
                   onDragEnd={handleDragEnd}
                 >
                   <SortableContext
-                    items={editingPlaylist.mediaIds || []}
+                    items={editingPlaylist.items.map(i => i.id)}
                     strategy={verticalListSortingStrategy}
                   >
-                    {(editingPlaylist.mediaIds || []).map((mediaId, index) => (
-                      // @ts-ignore
+                    {editingPlaylist.items.map((item, index) => (
                       <SortableItem
-                        key={`${mediaId}-${index}`}
-                        id={`${mediaId}-${index}`}
-                        mediaId={mediaId}
+                        key={item.id}
+                        id={item.id}
+                        mediaId={item.mediaId || "__AD_BREAK__"}
                         index={index}
-                        item={media.find(m => m.id === mediaId)}
+                        item={media.find(m => m.id === item.mediaId)}
                         onRemove={removeFromPlaylist}
                       />
                     ))}
                   </SortableContext>
                 </DndContext>
-                {(editingPlaylist.mediaIds || []).length > 0 && (
+                {editingPlaylist.items.length > 0 && (
                   <Button 
                     variant="outline" 
                     className="w-full border-dashed border-amber-300 bg-amber-50/50 text-amber-700 hover:bg-amber-50 hover:text-amber-800"
                     onClick={() => setEditingPlaylist({
                       ...editingPlaylist,
-                      mediaIds: [...(editingPlaylist.mediaIds || []), "__AD_BREAK__"]
+                      items: [...editingPlaylist.items, { id: `ad-break-${Date.now()}`, isAdBreak: true }]
                     })}
                   >
                     <Plus className="mr-2 h-4 w-4" />
                     Insert Ad Break
                   </Button>
                 )}
-                {(editingPlaylist.mediaIds || []).length === 0 && (
+                {editingPlaylist.items.length === 0 && (
                   <div className="text-center py-12 text-zinc-500 border-2 border-dashed border-zinc-200 rounded-lg">
                     No media items in this playlist. Add some from the library.
                   </div>
@@ -411,7 +410,7 @@ export function PlaylistEditor({ profile }: { profile: any }) {
                   {playlist.name}
                 </CardTitle>
                 <CardDescription>
-                  {(playlist.mediaIds || []).length} items • Created {new Date(playlist.createdAt).toLocaleDateString()}
+                  {(playlist.items || []).length} items • Created {new Date(playlist.createdAt).toLocaleDateString()}
                 </CardDescription>
               </CardHeader>
               <CardFooter className="justify-between">

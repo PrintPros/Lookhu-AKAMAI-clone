@@ -1,4 +1,4 @@
-import type { Channel, Playlist, Media, CloudflareConfig, ChannelManifest } from "../types.ts";
+import type { Channel, Playlist, Media, CloudflareConfig, ChannelManifest, AdConfig, ManifestProgram } from "../types.ts";
 
 /**
  * Slugifies a string: lowercase, replaces spaces and special chars with hyphens, trims.
@@ -19,51 +19,63 @@ export function buildManifest(
   channel: Channel,
   playlist: Playlist,
   mediaItems: Media[],
-  cloudflareConfigs: CloudflareConfig[]
+  cloudflareConfigs: CloudflareConfig[],
+  adConfig: AdConfig
 ): ChannelManifest {
   const channelSlug = channel.channelSlug || slugify(channel.name);
 
-  // Filter for ready media and order by playlist.mediaIds
+  // Filter for ready media and order by playlist.items
   const readyMedia = mediaItems.filter((m) => m.status === "ready");
-  const orderedMedia = playlist.mediaIds
-    .map((id) => readyMedia.find((m) => m.id === id))
-    .filter((m): m is Media => !!m);
-
+  
   let totalDurationSeconds = 0;
+  const programs: ManifestProgram[] = [];
 
-  const programs = orderedMedia.map((m) => {
+  for (let i = 0; i < playlist.items.length; i++) {
+    const item = playlist.items[i];
+    if (item.isAdBreak) continue;
+
+    const m = readyMedia.find((m) => m.id === item.mediaId);
+    if (!m) continue;
+
     const config = cloudflareConfigs.find((c) => c.bucketName === m.bucketName) || 
                    cloudflareConfigs.find((c) => c.isActive);
     
     const duration = m.duration || 0;
     totalDurationSeconds += duration;
 
-    return {
+    // Check if the next item is an ad break
+    const nextItem = playlist.items[i + 1];
+    const adBreakAfter = !!nextItem?.isAdBreak;
+
+    programs.push({
       id: (m.artistName && m.songTitle)
         ? slugify(`${m.artistName}-${m.songTitle}`)
         : (m.r2Path?.split("/").pop() || m.id),
-      artistName: m.artistName || "Unknown Artist",
-      songTitle: m.songTitle || m.name,
       bucket: m.bucketName || config?.bucketName || "",
       publicBaseUrl: config?.publicBaseUrl || "",
       path: m.r2Path || `streams/${m.name}`,
       segments: m.segmentCount || 0,
       prefix: m.segmentPrefix || "segment_",
       pad: m.segmentPad || 4,
-      durationSeconds: duration
-    };
-  });
+      adBreakAfter
+    });
+  }
 
   return {
     channel: channelSlug,
-    // @ts-ignore - Adding channelId as requested by prompt even if not in types.ts interface yet
+    // @ts-ignore
     channelId: channel.id,
     segmentDuration: channel.segmentDuration || 6,
     window: channel.window || 10,
     updatedAt: new Date().toISOString(),
-    // @ts-ignore - Adding totalDurationSeconds as requested by prompt
+    // @ts-ignore
     totalDurationSeconds,
-    programs
+    programs,
+    adConfig: {
+      enabled: adConfig.enabled,
+      adPodSize: adConfig.adPodSize,
+      breakDurationSeconds: adConfig.breakDurationSeconds
+    }
   };
 }
 
