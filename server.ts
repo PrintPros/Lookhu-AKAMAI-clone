@@ -818,7 +818,13 @@ async function startServer() {
           if (!activeConfig) throw new Error("No active Cloudflare config");
 
           // 5. Build Manifest
-          const adConfig = channel.adConfig || { enabled: false, adPodSize: 2, breakDurationSeconds: 30 };
+          const adSettingsSnap = await dbAdmin.collection('settings').doc('ads').get();
+          const adSettingsData = adSettingsSnap.exists ? adSettingsSnap.data() : null;
+          const adConfig = {
+            enabled: adSettingsData?.enabled || false,
+            adPodSize: adSettingsData?.adPodSize || adSettingsData?.midRollFrequency || 2,
+            breakDurationSeconds: adSettingsData?.breakDurationSeconds || 30
+          };
           const manifest = buildManifest(channel, playlist, mediaItems, cfConfigs, adConfig);
           const validation = validateManifest(manifest);
           if (!validation.valid) throw new Error(`Invalid manifest: ${validation.errors.join(", ")}`);
@@ -977,7 +983,13 @@ export default {
       if (!manifestSettings?.r2AccessKeyId) throw new Error("Manifest bucket not configured in Settings");
 
       // Build manifest from data sent by browser
-      const adConfig = channel.adConfig || { enabled: false, adPodSize: 2, breakDurationSeconds: 30 };
+      const adSettingsSnap = await dbAdmin.collection('settings').doc('ads').get();
+      const adSettingsData = adSettingsSnap.exists ? adSettingsSnap.data() : null;
+      const adConfig = {
+        enabled: adSettingsData?.enabled || false,
+        adPodSize: adSettingsData?.adPodSize || adSettingsData?.midRollFrequency || 2,
+        breakDurationSeconds: adSettingsData?.breakDurationSeconds || 30
+      };
       const manifest = buildManifest(channel, playlist, mediaItems || [], [cfConfig], adConfig);
       const validation = validateManifest(manifest);
       if (!validation.valid) {
