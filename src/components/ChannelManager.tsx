@@ -143,8 +143,14 @@ export function ChannelManager({ setActiveTab, profile }: ChannelManagerProps) {
     if (channel.workerManifestUrl) return channel.workerManifestUrl;
     if (!channel.playlistId) return null;
     const playlist = playlists.find(p => p.id === channel.playlistId);
-    if (!playlist || !playlist.mediaIds || playlist.mediaIds.length === 0) return null;
-    const firstMediaId = playlist.mediaIds[0];
+    if (!playlist) return null;
+
+    const mediaIds = playlist.items 
+      ? playlist.items.filter(i => !i.isAdBreak).map(i => i.mediaId).filter(Boolean)
+      : (playlist.mediaIds || []);
+
+    if (mediaIds.length === 0) return null;
+    const firstMediaId = mediaIds[0];
     const firstMedia = media.find(m => m.id === firstMediaId);
     return firstMedia?.m3u8Url || null;
   };
@@ -193,7 +199,11 @@ export function ChannelManager({ setActiveTab, profile }: ChannelManagerProps) {
       if (!activeConfig) throw new Error("No active Cloudflare config. Add one in Settings.");
 
       // Get media items in playlist
-      const playlistMedia = playlist.mediaIds
+      const mediaIds = playlist.items 
+        ? playlist.items.filter(i => !i.isAdBreak).map(i => i.mediaId).filter(Boolean)
+        : (playlist.mediaIds || []);
+
+      const playlistMedia = mediaIds
         .map(id => media.find(m => m.id === id))
         .filter(Boolean);
 

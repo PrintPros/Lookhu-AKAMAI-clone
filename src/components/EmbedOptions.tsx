@@ -78,8 +78,14 @@ export function EmbedOptions({ profile }: EmbedOptionsProps) {
   const getChannelStreamUrl = (channel: Channel) => {
     if (!channel.playlistId) return null;
     const playlist = playlists.find(p => p.id === channel.playlistId);
-    if (!playlist || !playlist.mediaIds || playlist.mediaIds.length === 0) return null;
-    const firstMediaId = playlist.mediaIds[0];
+    if (!playlist) return null;
+
+    const mediaIds = playlist.items 
+      ? playlist.items.filter(i => !i.isAdBreak).map(i => i.mediaId).filter(Boolean)
+      : (playlist.mediaIds || []);
+
+    if (mediaIds.length === 0) return null;
+    const firstMediaId = mediaIds[0];
     const firstMedia = media.find(m => m.id === firstMediaId);
     return firstMedia?.m3u8Url || null;
   };

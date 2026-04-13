@@ -337,6 +337,7 @@ export async function deployChannelWorker(params: {
 
     const result = await response.json();
     if (!result.success) {
+      console.error("Cloudflare API error:", JSON.stringify(result));
       return { success: false, error: result.errors?.[0]?.message || "Failed to upload script" };
     }
 

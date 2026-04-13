@@ -106,6 +106,7 @@ async function startServer() {
 
   // API Routes
   app.get("/api/health", (req, res) => {
+    const transcodingWorking = !!ffmpeg.getAvailableFormats;
     res.json({ 
       status: "ok", 
       firebase: {
@@ -113,6 +114,9 @@ async function startServer() {
         projectId: firebaseConfig.projectId,
         dbAdmin: !!dbAdmin,
         authAdmin: !!authAdmin
+      },
+      transcoding: {
+        working: transcodingWorking
       }
     });
   });
@@ -883,7 +887,7 @@ async function startServer() {
 
           // 7. Update Channel
           const epoch = Math.floor(Date.now() / 1000);
-          const workerUrl = `https://rag-${channelSlug}.${activeConfig.accountId}.workers.dev`; // Placeholder, deploy worker below if needed
+          const workerUrl = `https://rag-${channelSlug}.${manifestSettings.accountId}.workers.dev`; // Placeholder, deploy worker below if needed
 
           const channelUpdate: any = {
             lastPublishedAt: new Date().toISOString(),
@@ -894,8 +898,8 @@ async function startServer() {
           // 8. Optionally re-deploy Worker
           if (channel.workerNeedsRedeploy) {
             const deployResult = await deployChannelWorker({
-              accountId: activeConfig.accountId,
-              cfApiToken: activeConfig.cfApiToken,
+              accountId: manifestSettings.accountId,
+              cfApiToken: manifestSettings.cfApiToken,
               channelSlug,
               manifestBucketUrl: manifestSettings.publicBaseUrl,
               epoch
@@ -1007,6 +1011,21 @@ export default {
     }
 
     try {
+      // Verify token
+      const decodedToken = await authAdmin.verifyIdToken(idToken);
+      const requesterUid = decodedToken.uid;
+
+      // Check permissions
+      const userDoc = await dbAdmin.collection("users").doc(requesterUid).get();
+      const userData = userDoc.exists ? userDoc.data() : null;
+      const isMasterAdmin = userData?.role === 'master_admin' || 
+                            ["lookhumaster@gmail.com", "rpduece@gmail.com"].includes(decodedToken.email);
+      
+      // Basic permission check: requester must be master admin, owner, or same account
+      if (!isMasterAdmin && (userData?.accountId !== channel.accountId && requesterUid !== channel.userId)) {
+        return res.status(403).json({ error: "Forbidden: You do not have permission to publish this channel." });
+      }
+
       // Fetch manifest settings
       const manifestSettingsSnap = await dbAdmin.collection("settings").doc("manifest").get();
       const manifestSettings = manifestSettingsSnap.exists ? manifestSettingsSnap.data() : null;
@@ -1050,8 +1069,8 @@ export default {
       const epoch = Math.floor(Date.now() / 1000);
       const { deployChannelWorker } = await import("./src/lib/workerDeployer.ts");
       const deployResult = await deployChannelWorker({
-        accountId: cfConfig.accountId,
-        cfApiToken: cfConfig.cfApiToken || cfConfig.apiToken,
+        accountId: manifestSettings.accountId,
+        cfApiToken: manifestSettings.cfApiToken,
         channelSlug,
         manifestBucketUrl: manifestSettings.publicBaseUrl,
         epoch,
@@ -1061,7 +1080,7 @@ export default {
 
       // Deploy embed player to Cloudflare Workers
       try {
-        const pagesUrl = await deployEmbedPlayer(cfConfig.accountId, cfConfig.cfApiToken || cfConfig.apiToken);
+        const pagesUrl = await deployEmbedPlayer(manifestSettings.accountId, manifestSettings.cfApiToken);
         await dbAdmin.collection("settings").doc("embedPlayer").set({ pagesUrl });
       } catch (err) {
         console.error("Embed deploy failed:", err);

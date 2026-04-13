@@ -1,15 +1,6 @@
 import { useState, useEffect } from "react";
 import { db, auth } from "../firebase";
-import { 
-  collection, 
-  query, 
-  where,
-  onSnapshot, 
-  addDoc, 
-  deleteDoc, 
-  doc,
-  updateDoc 
-} from "firebase/firestore";
+import { doc, getDoc, setDoc, updateDoc, collection, query, where, onSnapshot, addDoc, deleteDoc } from "firebase/firestore";
 import { CloudflareConfig, Channel } from "../types";
 import { Button } from "./ui/Button";
 import { Card } from "./ui/Card";
@@ -60,6 +51,17 @@ export function CloudflareSettings({ profile }: { profile: any }) {
   const [testing, setTesting] = useState(false);
   const [testResult, setTestResult] = useState<{ success: boolean; message: string } | null>(null);
 
+  // Manifest & Worker Master API state
+  const [manifestSettings, setManifestSettings] = useState({
+    accountId: "",
+    cfApiToken: "",
+    r2AccessKeyId: "",
+    r2SecretAccessKey: "",
+    bucketName: "",
+    publicBaseUrl: "",
+  });
+  const [savingManifest, setSavingManifest] = useState(false);
+
   // Scheduler state
   const [deployingScheduler, setDeployingScheduler] = useState(false);
   const [schedulerSecret, setSchedulerSecret] = useState("");
@@ -72,7 +74,6 @@ export function CloudflareSettings({ profile }: { profile: any }) {
   const [newConfig, setNewConfig] = useState({
     label: "",
     accountId: "",
-    cfApiToken: "",
     r2AccessKeyId: "",
     r2SecretAccessKey: "",
     bucketName: "",
@@ -107,6 +108,17 @@ export function CloudflareSettings({ profile }: { profile: any }) {
       console.error("Failed to fetch bucket usage:", e);
     }
   }
+
+  useEffect(() => {
+    const fetchManifest = async () => {
+      const docRef = doc(db, "settings", "manifest");
+      const docSnap = await getDoc(docRef);
+      if (docSnap.exists()) {
+        setManifestSettings(docSnap.data() as any);
+      }
+    };
+    fetchManifest();
+  }, []);
 
   useEffect(() => {
     if (!auth.currentUser || !profile) return;
@@ -154,6 +166,18 @@ export function CloudflareSettings({ profile }: { profile: any }) {
     };
   }, [profile]);
 
+  const handleSaveManifest = async () => {
+    setSavingManifest(true);
+    try {
+      await setDoc(doc(db, "settings", "manifest"), manifestSettings);
+      toast.success("Master API settings saved");
+    } catch (error) {
+      toast.error("Failed to save Master API settings");
+    } finally {
+      setSavingManifest(false);
+    }
+  };
+
   const handleTestConnection = async () => {
     setTesting(true);
     setTestResult(null);
@@ -186,8 +210,6 @@ export function CloudflareSettings({ profile }: { profile: any }) {
 
     const configData = {
       label: newConfig.label,
-      accountId: newConfig.accountId,
-      cfApiToken: newConfig.cfApiToken,
       r2AccessKeyId: newConfig.r2AccessKeyId,
       r2SecretAccessKey: newConfig.r2SecretAccessKey,
       bucketName: newConfig.bucketName,
@@ -222,17 +244,16 @@ export function CloudflareSettings({ profile }: { profile: any }) {
       return;
     }
 
-    const activeConfig = configs.find(c => c.isActive);
-    if (!activeConfig) {
-      toast.error("Please set an active Cloudflare configuration first");
+    if (!manifestSettings.accountId || !manifestSettings.cfApiToken) {
+      toast.error("Please configure the Master API settings first");
       return;
     }
 
     setDeployingScheduler(true);
     try {
       const result = await deploySchedulerWorker({
-        accountId: activeConfig.accountId,
-        cfApiToken: activeConfig.cfApiToken,
+        accountId: manifestSettings.accountId,
+        cfApiToken: manifestSettings.cfApiToken,
         appUrl: appUrl,
         schedulerSecret: schedulerSecret
       });
@@ -250,19 +271,18 @@ export function CloudflareSettings({ profile }: { profile: any }) {
   };
 
   const handleDeployChannelWorker = async (channel: Channel) => {
-    const config = configs.find(c => c.isActive);
-    if (!config) {
-      toast.error("No active Cloudflare configuration found");
+    if (!manifestSettings.accountId || !manifestSettings.cfApiToken || !manifestSettings.publicBaseUrl) {
+      toast.error("Please configure the Master API settings first");
       return;
     }
 
     setDeployingChannelId(channel.id);
     try {
       const result = await deployChannelWorker({
-        accountId: config.accountId,
-        cfApiToken: config.cfApiToken,
+        accountId: manifestSettings.accountId,
+        cfApiToken: manifestSettings.cfApiToken,
         channelSlug: channel.channelSlug,
-        manifestBucketUrl: config.publicBaseUrl,
+        manifestBucketUrl: manifestSettings.publicBaseUrl,
         epoch: Math.floor(Date.now() / 1000)
       });
 
@@ -417,12 +437,100 @@ export function CloudflareSettings({ profile }: { profile: any }) {
 
   return (
     <div className="space-y-12 pb-20">
+      {/* Master API Section */}
+      <section id="master-api" className="bg-white p-8 rounded-2xl border border-zinc-200 shadow-sm">
+        <div className="flex items-center justify-between mb-6">
+          <h2 className="text-2xl font-bold text-zinc-900 flex items-center gap-2">
+            <Zap className="h-6 w-6 text-amber-500" />
+            Master API (Manifest & Workers)
+          </h2>
+          <Badge variant="outline">Global Settings</Badge>
+        </div>
+        <p className="text-zinc-500 mb-6">
+          This configuration is used to deploy Cloudflare Workers and save the global manifest.json.
+          It requires a Cloudflare API Token with Worker deployment permissions, and R2 credentials for the manifest bucket.
+        </p>
+
+        <div className="grid gap-6 md:grid-cols-2">
+          <div className="space-y-4">
+            <div className="space-y-2">
+              <label className="text-sm font-medium">Account ID</label>
+              <Input
+                placeholder="Cloudflare Account ID"
+                value={manifestSettings.accountId}
+                onChange={(e) => setManifestSettings({ ...manifestSettings, accountId: e.target.value })}
+              />
+            </div>
+            <div className="space-y-2">
+              <label className="text-sm font-medium">Cloudflare API Token</label>
+              <Input
+                type="password"
+                placeholder="API Token (for Workers)"
+                value={manifestSettings.cfApiToken}
+                onChange={(e) => setManifestSettings({ ...manifestSettings, cfApiToken: e.target.value })}
+              />
+            </div>
+            <div className="space-y-2">
+              <label className="text-sm font-medium">Public Base URL</label>
+              <Input
+                placeholder="https://pub-xxx.r2.dev"
+                value={manifestSettings.publicBaseUrl}
+                onChange={(e) => setManifestSettings({ ...manifestSettings, publicBaseUrl: e.target.value })}
+              />
+            </div>
+          </div>
+
+          <div className="space-y-4">
+            <div className="space-y-2">
+              <label className="text-sm font-medium">R2 Access Key ID</label>
+              <Input
+                placeholder="R2 Access Key ID"
+                value={manifestSettings.r2AccessKeyId}
+                onChange={(e) => setManifestSettings({ ...manifestSettings, r2AccessKeyId: e.target.value })}
+              />
+            </div>
+            <div className="space-y-2">
+              <label className="text-sm font-medium">R2 Secret Access Key</label>
+              <Input
+                type="password"
+                placeholder="R2 Secret Access Key"
+                value={manifestSettings.r2SecretAccessKey}
+                onChange={(e) => setManifestSettings({ ...manifestSettings, r2SecretAccessKey: e.target.value })}
+              />
+            </div>
+            <div className="space-y-2">
+              <label className="text-sm font-medium">Manifest Bucket Name</label>
+              <Input
+                placeholder="my-manifest-bucket"
+                value={manifestSettings.bucketName}
+                onChange={(e) => setManifestSettings({ ...manifestSettings, bucketName: e.target.value })}
+              />
+            </div>
+
+            <div className="pt-4">
+              <Button
+                className="w-full bg-zinc-900 text-white hover:bg-zinc-800"
+                onClick={handleSaveManifest}
+                disabled={savingManifest || !manifestSettings.accountId || !manifestSettings.cfApiToken || !manifestSettings.bucketName}
+              >
+                {savingManifest ? (
+                  <Loader2 className="h-4 w-4 animate-spin mr-2" />
+                ) : (
+                  <CheckCircle2 className="h-4 w-4 mr-2" />
+                )}
+                Save Master API Settings
+              </Button>
+            </div>
+          </div>
+        </div>
+      </section>
+
       {/* Section A: Connected Buckets */}
       <section id="connected-buckets">
         <div className="flex items-center justify-between mb-6">
           <h2 className="text-2xl font-bold text-zinc-900 flex items-center gap-2">
             <Cloud className="h-6 w-6" />
-            Connected Buckets
+            Media Buckets
           </h2>
           <Badge variant="outline">{configs.length} Buckets</Badge>
         </div>
@@ -653,7 +761,7 @@ export function CloudflareSettings({ profile }: { profile: any }) {
       <section id="add-new-account" className="bg-white p-8 rounded-2xl border border-zinc-200 shadow-sm">
         <h2 className="text-2xl font-bold text-zinc-900 mb-6 flex items-center gap-2">
           <Plus className="h-6 w-6" />
-          Add New Cloudflare Account
+          Add New Media Bucket
         </h2>
 
         <div className="grid gap-6 md:grid-cols-2">
@@ -664,23 +772,6 @@ export function CloudflareSettings({ profile }: { profile: any }) {
                 placeholder="e.g. RAG Primary"
                 value={newConfig.label}
                 onChange={(e) => setNewConfig({ ...newConfig, label: e.target.value })}
-              />
-            </div>
-            <div className="space-y-2">
-              <label className="text-sm font-medium">Account ID</label>
-              <Input
-                placeholder="Cloudflare Account ID"
-                value={newConfig.accountId}
-                onChange={(e) => setNewConfig({ ...newConfig, accountId: e.target.value })}
-              />
-            </div>
-            <div className="space-y-2">
-              <label className="text-sm font-medium">Cloudflare API Token</label>
-              <Input
-                type="password"
-                placeholder="Cloudflare API Token"
-                value={newConfig.cfApiToken}
-                onChange={(e) => setNewConfig({ ...newConfig, cfApiToken: e.target.value })}
               />
             </div>
             <div className="space-y-2">

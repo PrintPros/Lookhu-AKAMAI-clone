@@ -96,6 +96,9 @@ service cloud.firestore {
     function isOwner(userId) {
       return isAuthenticated() && request.auth.uid == userId;
     }
+    function canDelete() {
+      return isAuthenticated() && (isMasterAdmin() || isOwner(resource.data.userId));
+    }
     function isDocOwner() {
       return isAuthenticated() && (
         (request.auth.uid == resource.data.userId) || 
@@ -160,7 +163,7 @@ service cloud.firestore {
 
     function isValidPlaylist(data) {
       return data.name is string && data.name.size() >= 1 && data.name.size() <= 100 &&
-             data.mediaIds is list && data.mediaIds.size() <= 100 &&
+             ((data.mediaIds is list && data.mediaIds.size() <= 100) || (data.items is list && data.items.size() <= 100)) &&
              isValidDateString(data.createdAt) &&
              isAuthenticated();
     }
@@ -226,7 +229,7 @@ service cloud.firestore {
       );
       allow update: if isAuthenticated() && (isDocOwner() || isMasterAdmin() || isSameAccount(resource.data.userId)) && isValidMedia(request.resource.data) &&
                     (request.resource.data.userId == resource.data.userId);
-      allow delete: if isAuthenticated() && (isDocOwner() || isMasterAdmin() || isSameAccount(resource.data.userId));
+      allow delete: if canDelete();
     }
 
     match /accounts/{accountId} {
@@ -250,7 +253,7 @@ service cloud.firestore {
         isSameAccount(request.resource.data.userId)
       );
       allow update: if isAuthenticated() && (isDocOwner() || isMasterAdmin() || isSameAccount(resource.data.userId)) && isValidChannel(request.resource.data);
-      allow delete: if isAuthenticated() && (isDocOwner() || isMasterAdmin() || isSameAccount(resource.data.userId));
+      allow delete: if canDelete();
     }
 
     match /playlists/{playlistId} {
@@ -260,7 +263,7 @@ service cloud.firestore {
         isSameAccount(request.resource.data.userId)
       );
       allow update: if isAuthenticated() && (isDocOwner() || isMasterAdmin() || isSameAccount(resource.data.userId)) && isValidPlaylist(request.resource.data);
-      allow delete: if isAuthenticated() && (isDocOwner() || isMasterAdmin() || isSameAccount(resource.data.userId));
+      allow delete: if canDelete();
     }
 
     match /scheduledPublishes/{publishId} {

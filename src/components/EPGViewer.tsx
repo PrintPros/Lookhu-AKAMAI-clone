@@ -130,9 +130,12 @@ export function EPGViewer({ channelId, epgData: externalEpg, profile }: EPGViewe
               const pData = { id: playlistDoc.id, ...playlistDoc.data() } as Playlist;
               setPlaylist(pData);
               
-              if (pData.items && pData.items.length > 0) {
+              const mediaIds = pData.items 
+                ? pData.items.filter(i => !i.isAdBreak).map(i => i.mediaId).filter(Boolean) as string[]
+                : (pData.mediaIds || []);
+
+              if (mediaIds.length > 0) {
                 const mediaPromises = [];
-                const mediaIds = pData.items.map(i => i.mediaId).filter(Boolean) as string[];
                 for (let i = 0; i < mediaIds.length; i += 10) {
                   const chunk = mediaIds.slice(i, i + 10);
                   const q = query(collection(db, "media"), where("__name__", "in", chunk));
