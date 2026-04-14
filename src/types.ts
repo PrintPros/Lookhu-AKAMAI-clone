@@ -169,6 +169,8 @@ export interface ManifestProgram {
   pad: number;
   adBreakAfter?: boolean;
   breakDurationSeconds?: number;
+  adUrl?: string; // URL of the ad to play
+  adDuration?: number; // duration of the ad
 }
 
 export interface ChannelManifest {

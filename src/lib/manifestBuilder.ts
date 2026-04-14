@@ -57,6 +57,17 @@ export function buildManifest(
     const nextItem = playlist.items[i + 1];
     const adBreakAfter = !!nextItem?.isAdBreak;
     const breakDurationSeconds = adBreakAfter ? (nextItem.duration || adConfig.breakDurationSeconds) : undefined;
+    
+    let adUrl: string | undefined;
+    let adDuration: number | undefined;
+
+    if (adBreakAfter && adConfig.enabled && adConfig.houseAds && adConfig.houseAds.length > 0) {
+      // Find a house ad that matches the break duration (or closest)
+      const matchingAds = adConfig.houseAds.filter(a => a.duration === breakDurationSeconds);
+      const ad = matchingAds.length > 0 ? matchingAds[0] : adConfig.houseAds[0];
+      adUrl = ad.url;
+      adDuration = ad.duration;
+    }
 
     programs.push({
       id: (m.artistName && m.songTitle)
@@ -69,7 +80,9 @@ export function buildManifest(
       prefix: m.segmentPrefix || "segment_",
       pad: m.segmentPad || 4,
       adBreakAfter,
-      breakDurationSeconds
+      breakDurationSeconds,
+      adUrl,
+      adDuration
     });
   }
 

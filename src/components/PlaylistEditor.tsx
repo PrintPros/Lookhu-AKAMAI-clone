@@ -170,6 +170,9 @@ export function PlaylistEditor({ profile }: { profile: any }) {
   const [newPlaylistName, setNewPlaylistName] = useState("");
   const [editingPlaylist, setEditingPlaylist] = useState<Playlist | null>(null);
   const [adSettings, setAdSettings] = useState<any>(null);
+  const [searchTerm, setSearchTerm] = useState("");
+  const [selectedCategory, setSelectedCategory] = useState<string>("All");
+  const categories = ["All", ...Array.from(new Set(media.map(m => m.genre || "Other")))];
 
   const displayName = (m: Media) => m.artistName && m.songTitle 
     ? `${m.artistName} — ${m.songTitle}` 
@@ -433,33 +436,55 @@ export function PlaylistEditor({ profile }: { profile: any }) {
               <CardHeader>
                 <CardTitle className="text-sm uppercase tracking-widest font-bold text-zinc-500">Media Library</CardTitle>
               </CardHeader>
-              <CardContent className="space-y-2 max-h-[600px] overflow-y-auto">
-                {media.filter(m => m.status === "ready").map((item) => (
-                  <div 
-                    key={item.id}
-                    className="flex items-center gap-3 p-2 hover:bg-zinc-50 border border-transparent hover:border-zinc-200 rounded-lg transition-all group"
+              <CardContent className="space-y-4">
+                <div className="space-y-2">
+                  <Input 
+                    placeholder="Search media..." 
+                    value={searchTerm} 
+                    onChange={(e) => setSearchTerm(e.target.value)}
+                  />
+                  <select 
+                    className="w-full p-2 text-sm border border-zinc-200 rounded-md"
+                    value={selectedCategory}
+                    onChange={(e) => setSelectedCategory(e.target.value)}
                   >
-                    <div className="h-8 w-12 bg-zinc-100 rounded flex items-center justify-center shrink-0">
-                      <FileVideo className="h-3 w-3 text-zinc-400" />
-                    </div>
-                    <div className="flex-1 min-w-0">
-                      <p className="text-xs font-medium truncate">{displayName(item)}</p>
-                      <div className="flex items-center gap-2 text-[10px] text-zinc-500">
-                        <span>{item.genre}</span>
-                        <span>•</span>
-                        <span>{item.duration ? `${Math.floor(item.duration / 60)} min` : "No duration"}</span>
-                      </div>
-                    </div>
-                    <Button 
-                      size="icon" 
-                      variant="ghost" 
-                      className="h-6 w-6"
-                      onClick={() => addToPlaylist(item.id)}
+                    {categories.map(cat => <option key={cat} value={cat}>{cat}</option>)}
+                  </select>
+                </div>
+                <div className="space-y-2 max-h-[2000px] overflow-y-auto">
+                  {media.filter(m => 
+                    m.status === "ready" && 
+                    (selectedCategory === "All" || (m.genre || "Other") === selectedCategory) &&
+                    (m.name.toLowerCase().includes(searchTerm.toLowerCase()) || 
+                     (m.songTitle || "").toLowerCase().includes(searchTerm.toLowerCase()) || 
+                     (m.artistName || "").toLowerCase().includes(searchTerm.toLowerCase()))
+                  ).map((item) => (
+                    <div 
+                      key={item.id}
+                      className="flex items-center gap-3 p-2 hover:bg-zinc-50 border border-transparent hover:border-zinc-200 rounded-lg transition-all group"
                     >
-                      <Plus className="h-3 w-3" />
-                    </Button>
-                  </div>
-                ))}
+                      <div className="h-8 w-12 bg-zinc-100 rounded flex items-center justify-center shrink-0">
+                        <FileVideo className="h-3 w-3 text-zinc-400" />
+                      </div>
+                      <div className="flex-1 min-w-0">
+                        <p className="text-xs font-medium truncate">{displayName(item)}</p>
+                        <div className="flex items-center gap-2 text-[10px] text-zinc-500">
+                          <span>{item.genre || "Other"}</span>
+                          <span>•</span>
+                          <span>{item.duration ? `${Math.floor(item.duration / 60)} min` : "No duration"}</span>
+                        </div>
+                      </div>
+                      <Button 
+                        size="icon" 
+                        variant="ghost" 
+                        className="h-6 w-6"
+                        onClick={() => addToPlaylist(item.id)}
+                      >
+                        <Plus className="h-3 w-3" />
+                      </Button>
+                    </div>
+                  ))}
+                </div>
               </CardContent>
             </Card>
           </div>

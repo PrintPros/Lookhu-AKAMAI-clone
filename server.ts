@@ -693,19 +693,23 @@ async function startServer() {
         ffmpeg(rawPath)
           .outputOptions([
             "-c:v libx264",
-            "-profile:v baseline",
-            "-level 3.0",
+            "-profile:v main",
+            "-level 4.0",
+            "-b:v 3500k",
+            "-maxrate 3500k",
+            "-bufsize 7000k",
+            "-vf scale=-2:720,fps=30",
             "-c:a aac",
             "-ar 44100",
             "-ac 2",
             "-b:a 128k",
             "-af aresample=async=1:first_pts=0",
-            "-vf scale=-2:720",
-            "-force_key_frames expr:gte(t,n_forced*6)",
-            "-crf 23",
-            "-preset fast",
-            "-hls_time 6",
+            "-g 60",
+            "-keyint_min 60",
+            "-sc_threshold 0",
+            "-hls_time 2",
             "-hls_list_size 0",
+            "-hls_flags independent_segments",
             `-hls_segment_filename ${path.join(segDir, "segment_%04d.ts")}`,
             "-f hls",
           ])
@@ -857,7 +861,8 @@ async function startServer() {
             midRollUrl: adSettingsData?.midRollUrl || "",
             enabled: adSettingsData?.enabled || false,
             adPodSize: adSettingsData?.adPodSize || adSettingsData?.midRollFrequency || 2,
-            breakDurationSeconds: adSettingsData?.breakDurationSeconds || 30
+            breakDurationSeconds: adSettingsData?.breakDurationSeconds || 30,
+            houseAds: adSettingsData?.houseAds || []
           };
           const manifest = buildManifest(channel, playlist, mediaItems, cfConfigs, adConfig);
           const validation = validateManifest(manifest);
@@ -1040,7 +1045,8 @@ export default {
         midRollUrl: adSettingsData?.midRollUrl || "",
         enabled: adSettingsData?.enabled || false,
         adPodSize: adSettingsData?.adPodSize || adSettingsData?.midRollFrequency || 2,
-        breakDurationSeconds: adSettingsData?.breakDurationSeconds || 30
+        breakDurationSeconds: adSettingsData?.breakDurationSeconds || 30,
+        houseAds: adSettingsData?.houseAds || []
       };
       const manifest = buildManifest(channel, playlist, mediaItems || [], [cfConfig], adConfig);
       const validation = validateManifest(manifest);
