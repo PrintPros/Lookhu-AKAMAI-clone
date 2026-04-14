@@ -139,6 +139,21 @@ export interface CloudflareConfig {
   userId: string;
 }
 
+export interface HouseAd {
+  id: string;
+  name: string;
+  type: 'station_id' | 'promo' | 'fallback';
+  url: string;
+  duration: number;
+  weight: number;
+  segments: number;
+  prefix: string;
+  pad: number;
+  path: string;
+  publicBaseUrl: string;
+  bucket: string;
+}
+
 export interface AdConfig {
   id: string;
   preRollUrl: string;
@@ -147,14 +162,7 @@ export interface AdConfig {
   breakDurationSeconds: number;
   enabled: boolean;
   label?: string;
-  houseAds?: Array<{
-    id: string;
-    name: string;
-    type: 'station_id' | 'promo' | 'fallback';
-    url: string;
-    duration: number;
-    weight: number;
-  }>;
+  houseAds?: HouseAd[];
   useFallback?: boolean;
   forceFrequency?: number;
 }
@@ -169,8 +177,9 @@ export interface ManifestProgram {
   pad: number;
   adBreakAfter?: boolean;
   breakDurationSeconds?: number;
-  adUrl?: string; // URL of the ad to play
-  adDuration?: number; // duration of the ad
+  adUrl?: string;
+  adDuration?: number;
+  isAd?: boolean;
 }
 
 export interface ChannelManifest {

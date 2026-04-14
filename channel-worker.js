@@ -72,6 +72,27 @@ function getCurrentPosition(manifest, env) {
   return { allSegments, totalSegments, currentFlatIndex, globalSeq, now, epoch, elapsed, segDur, loopDuration };
 }
 
+// FIX #3: Correct discontinuity counting that handles the loop-wrap boundary properly.
+function countDiscontinuitiesUpToSeq(allSegments, totalSegments, startGlobalSeq) {
+  if (totalSegments === 0 || startGlobalSeq <= 0) return 0;
+  const discsPerLoop = (() => {
+    let d = 0;
+    for (let i = 1; i < totalSegments; i++) {
+      if (allSegments[i].program.id !== allSegments[i - 1].program.id) d++;
+    }
+    if (allSegments[0].program.id !== allSegments[totalSegments - 1].program.id) d++;
+    return d;
+  })();
+  const fullLoops = Math.floor(startGlobalSeq / totalSegments);
+  let count = fullLoops * discsPerLoop;
+  const remainder = startGlobalSeq % totalSegments;
+  if (remainder > 0 && allSegments[0].program.id !== allSegments[totalSegments - 1].program.id) count++;
+  for (let i = 1; i < remainder; i++) {
+    if (allSegments[i].program.id !== allSegments[i - 1].program.id) count++;
+  }
+  return count;
+}
+
 async function handlePlaylist(request, env, ctx, corsHeaders) {
   const DVR_SEGMENTS = 30; // 3 minute DVR window — minimum for FAST distributors
 
@@ -83,40 +104,23 @@ async function handlePlaylist(request, env, ctx, corsHeaders) {
       return new Response("#EXTM3U\n# No content", {
         headers: { ...corsHeaders, "Content-Type": "application/x-mpegURL" }
       });
-    }
-
-   // Sequence numbers derived purely from globalSeq — monotonically increasing, never wraps
-    const startGlobalSeq = globalSeq - DVR_SEGMENTS;
-    const startSeq = Math.max(0, startGlobalSeq);
+    }    // Sequence numbers derived purely from globalSeq — monotonically increasing, never wraps
+    const startGlobalSeq = Math.max(0, globalSeq - DVR_SEGMENTS + 1);
+    const actualDvrCount = globalSeq - startGlobalSeq + 1;
+    const startSeq = startGlobalSeq;
 
     let playlist = "#EXTM3U\n";
     playlist += "#EXT-X-VERSION:3\n";
     playlist += `#EXT-X-TARGETDURATION:${segDur}\n`;
     playlist += `#EXT-X-MEDIA-SEQUENCE:${startSeq}\n`;
 
-   // Count discontinuities per full loop including wrap boundary
-    let discsPerLoop = 0;
-    for (let i = 1; i < totalSegments; i++) {
-      if (allSegments[i].program.id !== allSegments[i - 1].program.id) discsPerLoop++;
-    }
-    if (allSegments[totalSegments - 1].program.id !== allSegments[0].program.id) discsPerLoop++;
-
-    const safeStart = Math.max(0, startGlobalSeq);
-    const fullLoops = Math.floor(safeStart / totalSegments);
-    const remainder = safeStart % totalSegments;
-    let partialDiscs = 0;
-    if (remainder > 0 && allSegments[0].program.id !== allSegments[totalSegments - 1].program.id) {
-      partialDiscs++;
-    }
-    for (let i = 1; i < remainder; i++) {
-      if (allSegments[i].program.id !== allSegments[i - 1].program.id) partialDiscs++;
-    }
-    const discontinuityCount = (fullLoops * discsPerLoop) + partialDiscs;
+    // FIX #3: Use the corrected discontinuity counter
+    const discontinuityCount = countDiscontinuitiesUpToSeq(allSegments, totalSegments, startGlobalSeq);
     playlist += `#EXT-X-DISCONTINUITY-SEQUENCE:${discontinuityCount}\n`;
 
     let lastProgram = null;
 
-    for (let i = 0; i < DVR_SEGMENTS; i++) {
+    for (let i = 0; i < actualDvrCount; i++) {
       const seq = startGlobalSeq + i;
       const flatIndex = ((seq % totalSegments) + totalSegments) % totalSegments;
       const { program, segIndex } = allSegments[flatIndex];
@@ -124,7 +128,14 @@ async function handlePlaylist(request, env, ctx, corsHeaders) {
       // Detect program boundary
       const isProgramBoundary = lastProgram !== null && program.id !== lastProgram.id;
       if (isProgramBoundary) {
-        playlist += '#EXT-X-DISCONTINUITY\n';
+        // If transitioning FROM an ad program, emit CUE-IN
+        if (lastProgram.isAd) {
+          playlist += "#EXT-X-CUE-IN\n";
+          playlist += "#EXT-X-DISCONTINUITY\n";
+        } else {
+          playlist += "#EXT-X-DISCONTINUITY\n";
+        }
+        
         if (lastProgram.adBreakAfter && manifest.adConfig?.enabled) {
           const breakDuration = lastProgram.breakDurationSeconds || manifest.adConfig.breakDurationSeconds || 30;
           const breakId = `ad-break-${lastProgram.id}-${seq}`;
@@ -136,7 +147,9 @@ async function handlePlaylist(request, env, ctx, corsHeaders) {
       const pad = program.pad || 4;
       const prefix = program.prefix || "segment_";
       const segNum = segIndex.toString().padStart(pad, "0");
-
+      
+      const pdt = new Date((epoch + seq * segDur) * 1000).toISOString();
+      playlist += `#EXT-X-PROGRAM-DATE-TIME:${pdt}\n`;
       playlist += `#EXTINF:${segDur}.000,\n`;
       playlist += `/segments/${program.id}/${prefix}${segNum}.ts\n`;
 
@@ -149,6 +162,7 @@ async function handlePlaylist(request, env, ctx, corsHeaders) {
         "Content-Type": "application/x-mpegURL",
         "Cache-Control": "no-cache, no-store, must-revalidate",
         "X-Channel": env.CHANNEL_SLUG,
+        "X-Server-Time": Date.now().toString(), // FIX #4: Add X-Server-Time header
       }
     });
 
@@ -319,6 +333,8 @@ async function handleHealth(env, ctx, corsHeaders) {
       totalSegments: pos.totalSegments,
       loopDuration: pos.loopDuration,
       currentSegment: pos.currentFlatIndex,
+      globalSeq: pos.globalSeq,
+      serverTime: Date.now(), // FIX #4: Add serverTime
     }, null, 2), {
       headers: { ...corsHeaders, "Content-Type": "application/json" }
     });

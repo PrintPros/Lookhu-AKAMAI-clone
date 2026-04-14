@@ -84,6 +84,23 @@ export function buildManifest(
       adUrl,
       adDuration
     });
+
+    if (adBreakAfter && adConfig.enabled && adConfig.houseAds && adConfig.houseAds.length > 0) {
+      // Find a house ad that matches the break duration (or closest)
+      const matchingAds = adConfig.houseAds.filter(a => a.duration === breakDurationSeconds);
+      const ad = matchingAds.length > 0 ? matchingAds[0] : adConfig.houseAds[0];
+      
+      programs.push({
+        id: ad.id,
+        bucket: ad.bucket,
+        publicBaseUrl: ad.publicBaseUrl,
+        path: ad.path,
+        segments: ad.segments,
+        prefix: ad.prefix,
+        pad: ad.pad,
+        isAd: true
+      });
+    }
   }
 
   return {
