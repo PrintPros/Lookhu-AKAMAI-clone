@@ -20,7 +20,8 @@ import {
   Zap,
   RefreshCw,
   Globe,
-  Clock
+  Clock,
+  Edit
 } from "lucide-react";
 import { motion, AnimatePresence } from "framer-motion";
 import { handleFirestoreError, OperationType } from "../lib/firestore-errors";
@@ -85,6 +86,18 @@ export function CloudflareSettings({ profile }: { profile: any }) {
   const [showScanDialog, setShowScanDialog] = useState(false);
   const [selectedForImport, setSelectedForImport] = useState<Set<string>>(new Set());
   const [deleteConfirmId, setDeleteConfirmId] = useState<string | null>(null);
+  
+  // Edit state
+  const [editingConfig, setEditingConfig] = useState<CloudflareConfig | null>(null);
+  const [editForm, setEditForm] = useState({
+    label: "",
+    accountId: "",
+    r2AccessKeyId: "",
+    r2SecretAccessKey: "",
+    bucketName: "",
+    publicBaseUrl: "",
+  });
+  const [savingEdit, setSavingEdit] = useState(false);
 
   async function fetchBucketUsage(config: CloudflareConfig) {
     try {
@@ -210,6 +223,7 @@ export function CloudflareSettings({ profile }: { profile: any }) {
 
     const configData = {
       label: newConfig.label,
+      accountId: newConfig.accountId,
       r2AccessKeyId: newConfig.r2AccessKeyId,
       r2SecretAccessKey: newConfig.r2SecretAccessKey,
       bucketName: newConfig.bucketName,
@@ -235,6 +249,39 @@ export function CloudflareSettings({ profile }: { profile: any }) {
       toast.success("Bucket configuration saved");
     } catch (error) {
       handleFirestoreError(error, OperationType.CREATE, "cloudflareConfigs");
+    }
+  };
+
+  const handleEditClick = (config: CloudflareConfig) => {
+    setEditingConfig(config);
+    setEditForm({
+      label: config.label || "",
+      accountId: config.accountId || "",
+      r2AccessKeyId: config.r2AccessKeyId || "",
+      r2SecretAccessKey: config.r2SecretAccessKey || "",
+      bucketName: config.bucketName || "",
+      publicBaseUrl: config.publicBaseUrl || "",
+    });
+  };
+
+  const handleUpdateBucket = async () => {
+    if (!editingConfig) return;
+    setSavingEdit(true);
+    try {
+      await updateDoc(doc(db, "cloudflareConfigs", editingConfig.id), {
+        label: editForm.label,
+        accountId: editForm.accountId,
+        r2AccessKeyId: editForm.r2AccessKeyId,
+        r2SecretAccessKey: editForm.r2SecretAccessKey,
+        bucketName: editForm.bucketName,
+        publicBaseUrl: editForm.publicBaseUrl,
+      });
+      toast.success("Bucket configuration updated");
+      setEditingConfig(null);
+    } catch (error) {
+      handleFirestoreError(error, OperationType.UPDATE, `cloudflareConfigs/${editingConfig.id}`);
+    } finally {
+      setSavingEdit(false);
     }
   };
 
@@ -437,6 +484,323 @@ export function CloudflareSettings({ profile }: { profile: any }) {
 
   return (
     <div className="space-y-12 pb-20">
+      {/* Section E: R2 Storage Overview */}
+      <section className="bg-zinc-900 text-white p-8 rounded-2xl shadow-xl">
+        <div className="flex flex-col md:flex-row justify-between items-start md:items-center gap-6">
+          <div className="space-y-2">
+            <h2 className="text-2xl font-bold flex items-center gap-2">
+              <Database className="h-6 w-6 text-zinc-400" />
+              R2 Storage Overview
+            </h2>
+            <p className="text-zinc-400 text-sm">
+              Total storage across all accounts: <span className="text-white font-bold">{formatBytes(totalUsed)}</span> / {configs.length * 10} GB
+            </p>
+          </div>
+          
+          <Button 
+            className="bg-white text-zinc-900 hover:bg-zinc-100"
+            onClick={() => document.getElementById("add-new-account")?.scrollIntoView({ behavior: "smooth" })}
+          >
+            Add Another Account
+          </Button>
+        </div>
+
+        <div className="mt-8 h-4 w-full bg-zinc-800 rounded-full overflow-hidden flex">
+          {configs.map((config) => (
+            <div
+              key={config.id}
+              style={{ width: `${(config.usedBytes / totalMax) * 100}%` }}
+              className={`${getStorageColor(config.usedBytes, config.maxBytes)} border-r border-zinc-900 last:border-0`}
+              title={`${config.label}: ${formatBytes(config.usedBytes)}`}
+            />
+          ))}
+        </div>
+      </section>
+
+      {/* Section A: Connected Buckets */}
+      <section id="connected-buckets">
+        <div className="flex items-center justify-between mb-6">
+          <h2 className="text-2xl font-bold text-zinc-900 flex items-center gap-2">
+            <Cloud className="h-6 w-6" />
+            Media Buckets
+          </h2>
+          <Badge variant="outline">{configs.length} Buckets</Badge>
+        </div>
+
+        <div className="grid gap-4 md:grid-cols-2">
+          <AnimatePresence mode="popLayout">
+            {configs.map((config) => (
+              <motion.div
+                key={config.id}
+                initial={{ opacity: 0, scale: 0.95 }}
+                animate={{ opacity: 1, scale: 1 }}
+                exit={{ opacity: 0, scale: 0.95 }}
+                layout
+              >
+                <Card className="p-6 relative group overflow-hidden">
+                  <div className="flex justify-between items-start mb-4">
+                    <div>
+                      <h3 className="font-bold text-lg">{config.label}</h3>
+                      <p className="text-sm text-zinc-500 font-mono">{config.bucketName}</p>
+                      {config.accountId && <p className="text-xs text-zinc-400 mt-1">Account: {config.accountId}</p>}
+                    </div>
+                    <div className="flex gap-2">
+                      {config.usedBytes > 9.5 * 1024 * 1024 * 1024 ? (
+                        <Badge variant="destructive">Bucket full</Badge>
+                      ) : config.usedBytes > 9 * 1024 * 1024 * 1024 ? (
+                        <Badge className="bg-amber-100 text-amber-700 border-amber-200">Approaching limit</Badge>
+                      ) : null}
+                      {config.isActive && (
+                        <Badge className="bg-green-100 text-green-700 border-green-200">Active</Badge>
+                      )}
+                      <Button
+                        variant="ghost"
+                        size="icon"
+                        className="text-zinc-400 hover:text-zinc-900"
+                        onClick={() => handleEditClick(config)}
+                      >
+                        <Edit className="h-4 w-4" />
+                      </Button>
+                      <Button
+                        variant="ghost"
+                        size="icon"
+                        className="text-zinc-400 hover:text-red-600"
+                        onClick={() => setDeleteConfirmId(config.id)}
+                      >
+                        <Trash2 className="h-4 w-4" />
+                      </Button>
+                    </div>
+                  </div>
+
+                  <div className="space-y-2 mb-4">
+                    <div className="flex justify-between text-xs font-medium">
+                      <span>Storage Usage</span>
+                      <span>{formatBytes(config.usedBytes)} / 10 GB</span>
+                    </div>
+                    <div className="h-2 w-full bg-zinc-100 rounded-full overflow-hidden">
+                      <motion.div
+                        initial={{ width: 0 }}
+                        animate={{ width: `${(config.usedBytes / config.maxBytes) * 100}%` }}
+                        className={`h-full ${getStorageColor(config.usedBytes, config.maxBytes)}`}
+                      />
+                    </div>
+                  </div>
+
+                  <div className="flex items-center justify-between gap-2">
+                    <div className="flex items-center gap-2 text-xs text-zinc-400">
+                      <ExternalLink className="h-3 w-3" />
+                      <a 
+                        href={config.publicBaseUrl} 
+                        target="_blank" 
+                        rel="noopener noreferrer"
+                        className="hover:text-zinc-900 truncate max-w-[150px]"
+                      >
+                        {config.publicBaseUrl}
+                      </a>
+                    </div>
+                    <div className="flex gap-2">
+                      <Button 
+                        variant="outline" 
+                        size="sm" 
+                        className="h-7 text-[10px]"
+                        onClick={() => handleScanBucket(config)}
+                        disabled={scanning === config.id}
+                      >
+                        {scanning === config.id ? <Loader2 className="h-3 w-3 animate-spin mr-1" /> : <Database className="h-3 w-3 mr-1" />}
+                        Scan Bucket
+                      </Button>
+                      <Button 
+                        variant={config.isActive ? "secondary" : "outline"} 
+                        size="sm" 
+                        className="h-7 text-[10px]"
+                        onClick={() => handleSetActive(config.id)}
+                        disabled={config.isActive || config.usedBytes > 9.5 * 1024 * 1024 * 1024}
+                      >
+                        {config.isActive ? "Active" : "Set Active"}
+                      </Button>
+                    </div>
+                  </div>
+                </Card>
+              </motion.div>
+            ))}
+          </AnimatePresence>
+        </div>
+      </section>
+
+      {/* Section D: Add New Cloudflare Account */}
+      <section id="add-new-account" className="bg-white p-8 rounded-2xl border border-zinc-200 shadow-sm">
+        <h2 className="text-2xl font-bold text-zinc-900 mb-6 flex items-center gap-2">
+          <Plus className="h-6 w-6" />
+          Add New Media Bucket
+        </h2>
+
+        <div className="grid gap-6 md:grid-cols-2">
+          <div className="space-y-4">
+            <div className="space-y-2">
+              <label className="text-sm font-medium">Label</label>
+              <Input
+                placeholder="e.g. RAG Primary"
+                value={newConfig.label}
+                onChange={(e) => setNewConfig({ ...newConfig, label: e.target.value })}
+              />
+            </div>
+            <div className="space-y-2">
+              <label className="text-sm font-medium">Account ID</label>
+              <Input
+                placeholder="Cloudflare Account ID"
+                value={newConfig.accountId}
+                onChange={(e) => setNewConfig({ ...newConfig, accountId: e.target.value })}
+              />
+            </div>
+            <div className="space-y-2">
+              <label className="text-sm font-medium">R2 Access Key ID</label>
+              <Input
+                placeholder="R2 Access Key ID"
+                value={newConfig.r2AccessKeyId}
+                onChange={(e) => setNewConfig({ ...newConfig, r2AccessKeyId: e.target.value })}
+              />
+            </div>
+          </div>
+
+          <div className="space-y-4">
+            <div className="space-y-2">
+              <label className="text-sm font-medium">R2 Secret Access Key</label>
+              <Input
+                type="password"
+                placeholder="R2 Secret Access Key"
+                value={newConfig.r2SecretAccessKey}
+                onChange={(e) => setNewConfig({ ...newConfig, r2SecretAccessKey: e.target.value })}
+              />
+            </div>
+            <div className="space-y-2">
+              <label className="text-sm font-medium">Bucket Name</label>
+              <Input
+                placeholder="my-r2-bucket"
+                value={newConfig.bucketName}
+                onChange={(e) => setNewConfig({ ...newConfig, bucketName: e.target.value })}
+              />
+            </div>
+            <div className="space-y-2">
+              <label className="text-sm font-medium">Public Base URL</label>
+              <Input
+                placeholder="https://pub-xxx.r2.dev"
+                value={newConfig.publicBaseUrl}
+                onChange={(e) => setNewConfig({ ...newConfig, publicBaseUrl: e.target.value })}
+              />
+            </div>
+
+            <div className="pt-4 flex flex-col gap-4">
+              <div className="flex gap-3">
+                <Button
+                  variant="outline"
+                  className="flex-1"
+                  onClick={handleTestConnection}
+                  disabled={testing || !newConfig.accountId || !newConfig.r2SecretAccessKey}
+                >
+                  {testing ? (
+                    <Loader2 className="h-4 w-4 animate-spin mr-2" />
+                  ) : (
+                    <Database className="h-4 w-4 mr-2" />
+                  )}
+                  Test Connection
+                </Button>
+                <Button
+                  className="flex-1 bg-zinc-900 text-white hover:bg-zinc-800"
+                  onClick={handleSave}
+                  disabled={!newConfig.label || !newConfig.accountId || !newConfig.bucketName}
+                >
+                  Save Bucket
+                </Button>
+              </div>
+
+              {testResult && (
+                <motion.div
+                  initial={{ opacity: 0, y: -10 }}
+                  animate={{ opacity: 1, y: 0 }}
+                  className={`p-3 rounded-lg flex items-center gap-2 text-sm ${
+                    testResult.success ? "bg-green-50 text-green-700" : "bg-red-50 text-red-700"
+                  }`}
+                >
+                  {testResult.success ? (
+                    <CheckCircle2 className="h-4 w-4" />
+                  ) : (
+                    <AlertCircle className="h-4 w-4" />
+                  )}
+                  {testResult.message}
+                </motion.div>
+              )}
+            </div>
+          </div>
+        </div>
+      </section>
+
+      {/* Section C: Channel Workers */}
+      <section id="channel-workers">
+        <div className="flex items-center justify-between mb-6">
+          <h2 className="text-2xl font-bold text-zinc-900 flex items-center gap-2">
+            <Globe className="h-6 w-6" />
+            Channel Workers
+          </h2>
+          <Badge variant="outline">{channels.length} Channels</Badge>
+        </div>
+
+        <div className="grid gap-4">
+          {channels.map((channel) => (
+            <Card key={channel.id} className="p-4 flex items-center justify-between">
+              <div className="flex items-center gap-4">
+                <div className="h-10 w-10 rounded-lg bg-zinc-100 flex items-center justify-center">
+                  <Globe className="h-5 w-5 text-zinc-400" />
+                </div>
+                <div>
+                  <h3 className="font-bold text-sm">{channel.name}</h3>
+                  <p className="text-xs text-zinc-500 font-mono">/{channel.slug}</p>
+                </div>
+              </div>
+
+              <div className="flex items-center gap-6">
+                <div className="flex flex-col items-end">
+                  <span className="text-[10px] uppercase tracking-wider text-zinc-400 font-bold mb-1">Status</span>
+                  {channel.workerDeployed ? (
+                    <div className="flex items-center gap-1 text-green-600">
+                      <CheckCircle2 className="h-3 w-3" />
+                      <span className="text-xs font-medium">Deployed</span>
+                    </div>
+                  ) : (
+                    <div className="flex items-center gap-1 text-zinc-400">
+                      <AlertCircle className="h-3 w-3" />
+                      <span className="text-xs font-medium">Not Deployed</span>
+                    </div>
+                  )}
+                </div>
+
+                {channel.workerNeedsRedeploy && (
+                  <Badge className="bg-amber-100 text-amber-700 border-amber-200">Update Needed</Badge>
+                )}
+
+                <Button
+                  variant="outline"
+                  size="sm"
+                  onClick={() => handleDeployChannelWorker(channel)}
+                  disabled={deployingChannelId === channel.id || !configs.some(c => c.isActive)}
+                >
+                  {deployingChannelId === channel.id ? (
+                    <Loader2 className="h-3 w-3 animate-spin mr-2" />
+                  ) : (
+                    <RefreshCw className="h-3 w-3 mr-2" />
+                  )}
+                  {channel.workerDeployed ? "Redeploy" : "Deploy Worker"}
+                </Button>
+              </div>
+            </Card>
+          ))}
+          {channels.length === 0 && (
+            <div className="py-12 text-center border-2 border-dashed border-zinc-200 rounded-xl">
+              <p className="text-zinc-500">No channels found. Create one to manage its worker.</p>
+            </div>
+          )}
+        </div>
+      </section>
+
       {/* Master API Section */}
       <section id="master-api" className="bg-white p-8 rounded-2xl border border-zinc-200 shadow-sm">
         <div className="flex items-center justify-between mb-6">
@@ -525,107 +889,6 @@ export function CloudflareSettings({ profile }: { profile: any }) {
         </div>
       </section>
 
-      {/* Section A: Connected Buckets */}
-      <section id="connected-buckets">
-        <div className="flex items-center justify-between mb-6">
-          <h2 className="text-2xl font-bold text-zinc-900 flex items-center gap-2">
-            <Cloud className="h-6 w-6" />
-            Media Buckets
-          </h2>
-          <Badge variant="outline">{configs.length} Buckets</Badge>
-        </div>
-
-        <div className="grid gap-4 md:grid-cols-2">
-          <AnimatePresence mode="popLayout">
-            {configs.map((config) => (
-              <motion.div
-                key={config.id}
-                initial={{ opacity: 0, scale: 0.95 }}
-                animate={{ opacity: 1, scale: 1 }}
-                exit={{ opacity: 0, scale: 0.95 }}
-                layout
-              >
-                <Card className="p-6 relative group overflow-hidden">
-                  <div className="flex justify-between items-start mb-4">
-                    <div>
-                      <h3 className="font-bold text-lg">{config.label}</h3>
-                      <p className="text-sm text-zinc-500 font-mono">{config.bucketName}</p>
-                    </div>
-                    <div className="flex gap-2">
-                      {config.usedBytes > 9.5 * 1024 * 1024 * 1024 ? (
-                        <Badge variant="destructive">Bucket full</Badge>
-                      ) : config.usedBytes > 9 * 1024 * 1024 * 1024 ? (
-                        <Badge className="bg-amber-100 text-amber-700 border-amber-200">Approaching limit</Badge>
-                      ) : null}
-                      {config.isActive && (
-                        <Badge className="bg-green-100 text-green-700 border-green-200">Active</Badge>
-                      )}
-                      <Button
-                        variant="ghost"
-                        size="icon"
-                        className="text-zinc-400 hover:text-red-600"
-                        onClick={() => setDeleteConfirmId(config.id)}
-                      >
-                        <Trash2 className="h-4 w-4" />
-                      </Button>
-                    </div>
-                  </div>
-
-                  <div className="space-y-2 mb-4">
-                    <div className="flex justify-between text-xs font-medium">
-                      <span>Storage Usage</span>
-                      <span>{formatBytes(config.usedBytes)} / 10 GB</span>
-                    </div>
-                    <div className="h-2 w-full bg-zinc-100 rounded-full overflow-hidden">
-                      <motion.div
-                        initial={{ width: 0 }}
-                        animate={{ width: `${(config.usedBytes / config.maxBytes) * 100}%` }}
-                        className={`h-full ${getStorageColor(config.usedBytes, config.maxBytes)}`}
-                      />
-                    </div>
-                  </div>
-
-                  <div className="flex items-center justify-between gap-2">
-                    <div className="flex items-center gap-2 text-xs text-zinc-400">
-                      <ExternalLink className="h-3 w-3" />
-                      <a 
-                        href={config.publicBaseUrl} 
-                        target="_blank" 
-                        rel="noopener noreferrer"
-                        className="hover:text-zinc-900 truncate max-w-[150px]"
-                      >
-                        {config.publicBaseUrl}
-                      </a>
-                    </div>
-                    <div className="flex gap-2">
-                      <Button 
-                        variant="outline" 
-                        size="sm" 
-                        className="h-7 text-[10px]"
-                        onClick={() => handleScanBucket(config)}
-                        disabled={scanning === config.id}
-                      >
-                        {scanning === config.id ? <Loader2 className="h-3 w-3 animate-spin mr-1" /> : <Database className="h-3 w-3 mr-1" />}
-                        Scan Bucket
-                      </Button>
-                      <Button 
-                        variant={config.isActive ? "secondary" : "outline"} 
-                        size="sm" 
-                        className="h-7 text-[10px]"
-                        onClick={() => handleSetActive(config.id)}
-                        disabled={config.isActive || config.usedBytes > 9.5 * 1024 * 1024 * 1024}
-                      >
-                        {config.isActive ? "Active" : "Set Active"}
-                      </Button>
-                    </div>
-                  </div>
-                </Card>
-              </motion.div>
-            ))}
-          </AnimatePresence>
-        </div>
-      </section>
-
       {/* Section B: Scheduler Worker Deployment */}
       <section id="scheduler-worker">
         <div className="flex items-center justify-between mb-6">
@@ -690,205 +953,6 @@ export function CloudflareSettings({ profile }: { profile: any }) {
         </Card>
       </section>
 
-      {/* Section C: Channel Workers */}
-      <section id="channel-workers">
-        <div className="flex items-center justify-between mb-6">
-          <h2 className="text-2xl font-bold text-zinc-900 flex items-center gap-2">
-            <Globe className="h-6 w-6" />
-            Channel Workers
-          </h2>
-          <Badge variant="outline">{channels.length} Channels</Badge>
-        </div>
-
-        <div className="grid gap-4">
-          {channels.map((channel) => (
-            <Card key={channel.id} className="p-4 flex items-center justify-between">
-              <div className="flex items-center gap-4">
-                <div className="h-10 w-10 rounded-lg bg-zinc-100 flex items-center justify-center">
-                  <Globe className="h-5 w-5 text-zinc-400" />
-                </div>
-                <div>
-                  <h3 className="font-bold text-sm">{channel.name}</h3>
-                  <p className="text-xs text-zinc-500 font-mono">/{channel.slug}</p>
-                </div>
-              </div>
-
-              <div className="flex items-center gap-6">
-                <div className="flex flex-col items-end">
-                  <span className="text-[10px] uppercase tracking-wider text-zinc-400 font-bold mb-1">Status</span>
-                  {channel.workerDeployed ? (
-                    <div className="flex items-center gap-1 text-green-600">
-                      <CheckCircle2 className="h-3 w-3" />
-                      <span className="text-xs font-medium">Deployed</span>
-                    </div>
-                  ) : (
-                    <div className="flex items-center gap-1 text-zinc-400">
-                      <AlertCircle className="h-3 w-3" />
-                      <span className="text-xs font-medium">Not Deployed</span>
-                    </div>
-                  )}
-                </div>
-
-                {channel.workerNeedsRedeploy && (
-                  <Badge className="bg-amber-100 text-amber-700 border-amber-200">Update Needed</Badge>
-                )}
-
-                <Button
-                  variant="outline"
-                  size="sm"
-                  onClick={() => handleDeployChannelWorker(channel)}
-                  disabled={deployingChannelId === channel.id || !configs.some(c => c.isActive)}
-                >
-                  {deployingChannelId === channel.id ? (
-                    <Loader2 className="h-3 w-3 animate-spin mr-2" />
-                  ) : (
-                    <RefreshCw className="h-3 w-3 mr-2" />
-                  )}
-                  {channel.workerDeployed ? "Redeploy" : "Deploy Worker"}
-                </Button>
-              </div>
-            </Card>
-          ))}
-          {channels.length === 0 && (
-            <div className="py-12 text-center border-2 border-dashed border-zinc-200 rounded-xl">
-              <p className="text-zinc-500">No channels found. Create one to manage its worker.</p>
-            </div>
-          )}
-        </div>
-      </section>
-
-      {/* Section D: Add New Cloudflare Account */}
-      <section id="add-new-account" className="bg-white p-8 rounded-2xl border border-zinc-200 shadow-sm">
-        <h2 className="text-2xl font-bold text-zinc-900 mb-6 flex items-center gap-2">
-          <Plus className="h-6 w-6" />
-          Add New Media Bucket
-        </h2>
-
-        <div className="grid gap-6 md:grid-cols-2">
-          <div className="space-y-4">
-            <div className="space-y-2">
-              <label className="text-sm font-medium">Label</label>
-              <Input
-                placeholder="e.g. RAG Primary"
-                value={newConfig.label}
-                onChange={(e) => setNewConfig({ ...newConfig, label: e.target.value })}
-              />
-            </div>
-            <div className="space-y-2">
-              <label className="text-sm font-medium">R2 Access Key ID</label>
-              <Input
-                placeholder="R2 Access Key ID"
-                value={newConfig.r2AccessKeyId}
-                onChange={(e) => setNewConfig({ ...newConfig, r2AccessKeyId: e.target.value })}
-              />
-            </div>
-          </div>
-
-          <div className="space-y-4">
-            <div className="space-y-2">
-              <label className="text-sm font-medium">R2 Secret Access Key</label>
-              <Input
-                type="password"
-                placeholder="R2 Secret Access Key"
-                value={newConfig.r2SecretAccessKey}
-                onChange={(e) => setNewConfig({ ...newConfig, r2SecretAccessKey: e.target.value })}
-              />
-            </div>
-            <div className="space-y-2">
-              <label className="text-sm font-medium">Bucket Name</label>
-              <Input
-                placeholder="my-r2-bucket"
-                value={newConfig.bucketName}
-                onChange={(e) => setNewConfig({ ...newConfig, bucketName: e.target.value })}
-              />
-            </div>
-            <div className="space-y-2">
-              <label className="text-sm font-medium">Public Base URL</label>
-              <Input
-                placeholder="https://pub-xxx.r2.dev"
-                value={newConfig.publicBaseUrl}
-                onChange={(e) => setNewConfig({ ...newConfig, publicBaseUrl: e.target.value })}
-              />
-            </div>
-
-            <div className="pt-4 flex flex-col gap-4">
-              <div className="flex gap-3">
-                <Button
-                  variant="outline"
-                  className="flex-1"
-                  onClick={handleTestConnection}
-                  disabled={testing || !newConfig.r2SecretAccessKey}
-                >
-                  {testing ? (
-                    <Loader2 className="h-4 w-4 animate-spin mr-2" />
-                  ) : (
-                    <Database className="h-4 w-4 mr-2" />
-                  )}
-                  Test Connection
-                </Button>
-                <Button
-                  className="flex-1 bg-zinc-900 text-white hover:bg-zinc-800"
-                  onClick={handleSave}
-                  disabled={!newConfig.label || !newConfig.bucketName}
-                >
-                  Save Bucket
-                </Button>
-              </div>
-
-              {testResult && (
-                <motion.div
-                  initial={{ opacity: 0, y: -10 }}
-                  animate={{ opacity: 1, y: 0 }}
-                  className={`p-3 rounded-lg flex items-center gap-2 text-sm ${
-                    testResult.success ? "bg-green-50 text-green-700" : "bg-red-50 text-red-700"
-                  }`}
-                >
-                  {testResult.success ? (
-                    <CheckCircle2 className="h-4 w-4" />
-                  ) : (
-                    <AlertCircle className="h-4 w-4" />
-                  )}
-                  {testResult.message}
-                </motion.div>
-              )}
-            </div>
-          </div>
-        </div>
-      </section>
-
-      {/* Section E: R2 Storage Overview */}
-      <section className="bg-zinc-900 text-white p-8 rounded-2xl shadow-xl">
-        <div className="flex flex-col md:flex-row justify-between items-start md:items-center gap-6">
-          <div className="space-y-2">
-            <h2 className="text-2xl font-bold flex items-center gap-2">
-              <Database className="h-6 w-6 text-zinc-400" />
-              R2 Storage Overview
-            </h2>
-            <p className="text-zinc-400 text-sm">
-              Total storage across all accounts: <span className="text-white font-bold">{formatBytes(totalUsed)}</span> / {configs.length * 10} GB
-            </p>
-          </div>
-          
-          <Button 
-            className="bg-white text-zinc-900 hover:bg-zinc-100"
-            onClick={() => document.getElementById("add-new-account")?.scrollIntoView({ behavior: "smooth" })}
-          >
-            Add Another Account
-          </Button>
-        </div>
-
-        <div className="mt-8 h-4 w-full bg-zinc-800 rounded-full overflow-hidden flex">
-          {configs.map((config) => (
-            <div
-              key={config.id}
-              style={{ width: `${(config.usedBytes / totalMax) * 100}%` }}
-              className={`${getStorageColor(config.usedBytes, config.maxBytes)} border-r border-zinc-900 last:border-0`}
-              title={`${config.label}: ${formatBytes(config.usedBytes)}`}
-            />
-          ))}
-        </div>
-      </section>
-
       {/* Dialogs */}
       {showScanDialog && (
         <Dialog
@@ -947,6 +1011,71 @@ export function CloudflareSettings({ profile }: { profile: any }) {
               onClick={() => handleDelete(deleteConfirmId)}
             >
               Delete Connection
+            </Button>
+          </div>
+        </Dialog>
+      )}
+
+      {editingConfig && (
+        <Dialog
+          isOpen={!!editingConfig}
+          onClose={() => setEditingConfig(null)}
+          title="Edit Bucket Connection"
+          description="Update the credentials and settings for this bucket."
+        >
+          <div className="space-y-4 mt-4">
+            <div className="space-y-2">
+              <label className="text-sm font-medium">Label</label>
+              <Input
+                value={editForm.label}
+                onChange={(e) => setEditForm({ ...editForm, label: e.target.value })}
+              />
+            </div>
+            <div className="space-y-2">
+              <label className="text-sm font-medium">Account ID</label>
+              <Input
+                value={editForm.accountId}
+                onChange={(e) => setEditForm({ ...editForm, accountId: e.target.value })}
+              />
+            </div>
+            <div className="space-y-2">
+              <label className="text-sm font-medium">R2 Access Key ID</label>
+              <Input
+                value={editForm.r2AccessKeyId}
+                onChange={(e) => setEditForm({ ...editForm, r2AccessKeyId: e.target.value })}
+              />
+            </div>
+            <div className="space-y-2">
+              <label className="text-sm font-medium">R2 Secret Access Key</label>
+              <Input
+                type="password"
+                value={editForm.r2SecretAccessKey}
+                onChange={(e) => setEditForm({ ...editForm, r2SecretAccessKey: e.target.value })}
+              />
+            </div>
+            <div className="space-y-2">
+              <label className="text-sm font-medium">Bucket Name</label>
+              <Input
+                value={editForm.bucketName}
+                onChange={(e) => setEditForm({ ...editForm, bucketName: e.target.value })}
+              />
+            </div>
+            <div className="space-y-2">
+              <label className="text-sm font-medium">Public Base URL</label>
+              <Input
+                value={editForm.publicBaseUrl}
+                onChange={(e) => setEditForm({ ...editForm, publicBaseUrl: e.target.value })}
+              />
+            </div>
+          </div>
+          <div className="flex justify-end gap-2 mt-6">
+            <Button variant="ghost" onClick={() => setEditingConfig(null)}>Cancel</Button>
+            <Button 
+              onClick={handleUpdateBucket}
+              disabled={savingEdit || !editForm.label || !editForm.accountId || !editForm.bucketName}
+            >
+              {savingEdit ? <Loader2 className="h-4 w-4 animate-spin mr-2" /> : null}
+              Save Changes
             </Button>
           </div>
         </Dialog>

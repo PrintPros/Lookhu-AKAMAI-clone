@@ -916,6 +916,11 @@ async function startServer() {
             } else {
               errors.push(`Worker deploy failed for ${channelSlug}: ${deployResult.error}`);
             }
+          } else {
+            // If we don't redeploy, we still need to construct the correct worker URL
+            // We don't have the subdomain here easily, so we rely on the existing workerManifestUrl if available
+            const wUrl = channel.workerManifestUrl ? channel.workerManifestUrl.replace("/index.m3u8", "").replace("/live.m3u8", "") : `https://fastfasts-${channelSlug}.workers.dev`;
+            channelUpdate.workerManifestUrl = `${wUrl}/index.m3u8`;
           }
 
           await dbAdmin.collection("channels").doc(channel.id).update(channelUpdate);
@@ -1121,6 +1126,41 @@ export default {
       const result = await deployChannelWorker(req.body);
       res.json(result);
     } catch (err: any) {
+      res.status(500).json({ success: false, error: err.message });
+    }
+  });
+
+  app.delete("/api/deploy/channel/:slug", async (req, res) => {
+    try {
+      const { slug } = req.params;
+      const authHeader = req.headers.authorization;
+      if (!authHeader?.startsWith("Bearer ")) {
+        return res.status(401).json({ error: "Unauthorized" });
+      }
+      
+      const idToken = authHeader.split("Bearer ")[1];
+      await authAdmin.verifyIdToken(idToken);
+
+      const settingsDoc = await dbAdmin.collection("settings").doc("masterApi").get();
+      if (!settingsDoc.exists) {
+        return res.status(400).json({ error: "Master API settings not configured" });
+      }
+
+      const manifestSettings = settingsDoc.data();
+      if (!manifestSettings?.accountId || !manifestSettings?.cfApiToken) {
+        return res.status(400).json({ error: "Cloudflare credentials missing in Master API settings" });
+      }
+
+      const { deleteChannelWorker } = await import("./src/lib/workerDeployer.ts");
+      const result = await deleteChannelWorker(
+        manifestSettings.accountId,
+        manifestSettings.cfApiToken,
+        slug
+      );
+      
+      res.json(result);
+    } catch (err: any) {
+      console.error("Delete Channel Worker Error:", err);
       res.status(500).json({ success: false, error: err.message });
     }
   });

@@ -278,12 +278,28 @@ export function ChannelManager({ setActiveTab, profile }: ChannelManagerProps) {
     }
   };
 
-  const handleDelete = async (id: string) => {
+  const handleDelete = async (channel: Channel) => {
     try {
-      await deleteDoc(doc(db, "channels", id));
+      // Delete the channel from Firestore
+      await deleteDoc(doc(db, "channels", channel.id));
+      
+      // Attempt to delete the worker from Cloudflare
+      if (channel.channelSlug) {
+        const slug = channel.channelSlug;
+        const idToken = await auth.currentUser?.getIdToken();
+        if (idToken) {
+          fetch(`/api/deploy/channel/${slug}`, {
+            method: "DELETE",
+            headers: {
+              "Authorization": `Bearer ${idToken}`
+            }
+          }).catch(err => console.error("Failed to delete worker:", err));
+        }
+      }
+
       toast.success("Channel deleted");
     } catch (error) {
-      handleFirestoreError(error, OperationType.DELETE, `channels/${id}`);
+      handleFirestoreError(error, OperationType.DELETE, `channels/${channel.id}`);
     }
   };
 
@@ -393,7 +409,7 @@ export function ChannelManager({ setActiveTab, profile }: ChannelManagerProps) {
                     size="icon" 
                     variant="ghost" 
                     className="h-8 w-8 text-red-500 hover:text-red-600"
-                    onClick={() => handleDelete(channel.id)}
+                    onClick={() => handleDelete(channel)}
                   >
                     <Trash2 className="h-4 w-4" />
                   </Button>
