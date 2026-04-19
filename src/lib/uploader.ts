@@ -175,3 +175,95 @@ export async function uploadVideoToR2(
   throw err;
 }
 }
+
+export async function uploadHouseAdToR2(
+  file: File,
+  metadata: any,
+  onProgress: (phase: string, percent: number, message: string) => void
+) {
+  if (!auth.currentUser) throw new Error("User not authenticated");
+  
+  onProgress("uploading", 5, "Validating file...");
+  
+  if (file.type !== "video/mp4" && !file.name.toLowerCase().endsWith(".mp4")) {
+    throw new Error("Only MP4 files are accepted.");
+  }
+  
+  if (file.size > MAX_FILE_SIZE) {
+    throw new Error(`File too large (${(file.size / 1024 / 1024).toFixed(0)}MB).`);
+  }
+  
+  onProgress("uploading", 10, "Fetching bucket config...");
+  
+  const cfQ = query(
+    collection(db, "cloudflareConfigs"),
+    where("userId", "==", auth.currentUser.uid),
+    where("isActive", "==", true),
+    limit(1)
+  );
+  const cfSnap = await getDocs(cfQ);
+  if (cfSnap.empty) throw new Error("No active R2 bucket.");
+  
+  const configId = cfSnap.docs[0].id;
+  const cfData = cfSnap.docs[0].data();
+  const idToken = await auth.currentUser.getIdToken();
+  const safeFilename = file.name.replace(/[^a-zA-Z0-9]/g, "-").toLowerCase();
+  const videoId = `ad-${Date.now()}-${safeFilename}`;
+  const mp4Key = `house-ads/${videoId}.mp4`;
+  
+  onProgress("uploading", 20, "Generating upload URL...");
+  
+  const presignResp = await fetch("/api/r2/presign-secure", {
+    method: "POST",
+    headers: { "Content-Type": "application/json", "Authorization": `Bearer ${idToken}` },
+    body: JSON.stringify({
+      configId,
+      accountId: cfData.accountId,
+      r2AccessKeyId: cfData.r2AccessKeyId,
+      r2SecretAccessKey: cfData.r2SecretAccessKey,
+      bucketName: cfData.bucketName,
+      keys: [{ key: mp4Key, contentType: "video/mp4" }]
+    }),
+  });
+  
+  if (!presignResp.ok) throw new Error("Failed to get upload URL");
+  const { urls } = await presignResp.json();
+  const { uploadUrl } = urls[0];
+  
+  onProgress("uploading", 30, "Uploading Ad to R2...");
+  const uploadResp = await fetch(uploadUrl, { method: "PUT", body: file, headers: { "Content-Type": "video/mp4" } });
+  if (!uploadResp.ok) throw new Error("Failed to upload video to R2");
+  
+  onProgress("processing", 50, "Transcoding house ad to HLS...");
+  
+  const transcodeResp = await fetch("/api/transcode", {
+    method: "POST",
+    headers: { "Content-Type": "application/json", "Authorization": `Bearer ${idToken}` },
+    body: JSON.stringify({
+      mp4Key,
+      configId,
+      accountId: cfData.accountId,
+      r2AccessKeyId: cfData.r2AccessKeyId,
+      r2SecretAccessKey: cfData.r2SecretAccessKey,
+      bucketName: cfData.bucketName,
+      publicBaseUrl: cfData.publicBaseUrl,
+      userId: auth.currentUser.uid,
+      outputFolder: "ads", // specify custom output folder in R2
+      metadata: { ...metadata, name: file.name }
+    }),
+  });
+  
+  if (!transcodeResp.ok) {
+    const errorData = await transcodeResp.json();
+    throw new Error(errorData.error || "Transcoding failed");
+  }
+  
+  const transcodeData = await transcodeResp.json();
+  onProgress("done", 100, "Transcode complete!");
+  
+  return {
+    ...transcodeData,
+    bucketName: cfData.bucketName,
+    publicBaseUrl: cfData.publicBaseUrl
+  };
+}

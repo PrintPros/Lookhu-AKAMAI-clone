@@ -60,6 +60,7 @@ export function CloudflareSettings({ profile }: { profile: any }) {
     r2SecretAccessKey: "",
     bucketName: "",
     publicBaseUrl: "",
+    workerBaseDomain: "",
   });
   const [savingManifest, setSavingManifest] = useState(false);
 
@@ -330,7 +331,8 @@ export function CloudflareSettings({ profile }: { profile: any }) {
         cfApiToken: manifestSettings.cfApiToken,
         channelSlug: channel.channelSlug,
         manifestBucketUrl: manifestSettings.publicBaseUrl,
-        epoch: Math.floor(Date.now() / 1000)
+        epoch: Math.floor(Date.now() / 1000),
+        workerBaseDomain: manifestSettings.workerBaseDomain
       });
 
       if (result.success) {
@@ -841,6 +843,17 @@ export function CloudflareSettings({ profile }: { profile: any }) {
                 value={manifestSettings.publicBaseUrl}
                 onChange={(e) => setManifestSettings({ ...manifestSettings, publicBaseUrl: e.target.value })}
               />
+            </div>
+            <div className="space-y-2">
+              <label className="text-sm font-medium">Worker Base Domain (Optional)</label>
+              <Input
+                placeholder="fasterfasts.com"
+                value={manifestSettings.workerBaseDomain || ""}
+                onChange={(e) => setManifestSettings({ ...manifestSettings, workerBaseDomain: e.target.value })}
+              />
+              <p className="text-[10px] text-zinc-500">
+                If provided, workers will be deployed to <code>channel-slug.yourdomain.com</code> instead of <code>.workers.dev</code>. You must have this zone active in Cloudflare.
+              </p>
             </div>
           </div>
 

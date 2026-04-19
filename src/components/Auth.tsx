@@ -96,7 +96,7 @@ export function Auth({ onSuccess }: AuthProps) {
             </div>
           </div>
           <div className="space-y-1">
-            <h1 className="text-4xl font-bold tracking-tighter text-zinc-900">FastFasts</h1>
+            <h1 className="text-4xl font-bold tracking-tighter text-zinc-900">FasterFasts</h1>
             <p className="text-zinc-500 font-medium">Fast Channel Playout Platform</p>
           </div>
         </div>
@@ -188,7 +188,7 @@ export function Auth({ onSuccess }: AuthProps) {
         </Card>
         
         <p className="text-center text-xs text-zinc-400">
-          &copy; 2026 FastFasts • Secure Playout Infrastructure
+          &copy; 2026 FasterFasts • Secure Playout Infrastructure
         </p>
       </div>
     </div>

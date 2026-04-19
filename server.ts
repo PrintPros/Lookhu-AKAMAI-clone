@@ -320,6 +320,15 @@ async function startServer() {
   });
 
   app.post("/api/r2/delete-folder", async (req, res) => {
+    const authHeader = req.headers.authorization;
+    if (!authHeader || !authHeader.startsWith("Bearer ")) {
+      return res.status(401).json({ error: "Unauthorized" });
+    }
+    const idToken = authHeader.split("Bearer ")[1];
+    if (!idToken || idToken.length < 20) {
+      return res.status(401).json({ error: "Invalid token" });
+    }
+
     const { accountId, r2AccessKeyId, r2SecretAccessKey, bucketName, prefix } = req.body;
     if (!accountId || !r2AccessKeyId || !r2SecretAccessKey || !bucketName || !prefix) {
       return res.status(400).json({ error: "Missing fields" });
@@ -647,13 +656,13 @@ async function startServer() {
     }
 
     const { mp4Key, mediaId, accountId, r2AccessKeyId, r2SecretAccessKey,
-            bucketName, publicBaseUrl, userId, metadata } = req.body;
+            bucketName, publicBaseUrl, userId, outputFolder, metadata } = req.body;
 
     if (!accountId || !r2AccessKeyId || !bucketName || !mp4Key) {
       return res.status(400).json({ error: "Missing required fields" });
     }
 
-    const rawVideoId = mp4Key.replace("uploads/", "").replace(".mp4", "");
+    const rawVideoId = mp4Key.replace(/.*?\//, "").replace(".mp4", "");
     const artist = metadata?.artistName || "";
     const title = metadata?.songTitle || "";
     const slugBase = artist && title
@@ -667,6 +676,10 @@ async function startServer() {
       .replace(/^-+|-+$/g, "")
       .substring(0, 60) // cap length
       + "-" + rawVideoId.split("-")[0]; // append timestamp prefix for uniqueness
+    
+    const targetFolder = outputFolder || "streams";
+    const baseR2Path = `${targetFolder}/${videoId}`;
+    
     const tmpDir = path.join(process.cwd(), "uploads", videoId);
     const rawPath = path.join(tmpDir, "original.mp4");
     const segDir = path.join(tmpDir, "segments");
@@ -693,23 +706,27 @@ async function startServer() {
         ffmpeg(rawPath)
           .outputOptions([
             "-c:v libx264",
-            "-profile:v main",
-            "-level 4.0",
-            "-b:v 3500k",
-            "-maxrate 3500k",
-            "-bufsize 7000k",
-            "-vf scale=-2:720,fps=30",
+            "-profile:v high",
+            "-level 4.1",
+            "-pix_fmt yuv420p",
+            "-b:v 4000k",
+            "-maxrate 4500k",
+            "-bufsize 9000k",
+            "-vf scale=1920:1080:force_original_aspect_ratio=decrease,pad=1920:1080:(ow-iw)/2:(oh-ih)/2,fps=30",
             "-c:a aac",
-            "-ar 44100",
+            "-ar 48000",
             "-ac 2",
             "-b:a 128k",
-            "-af aresample=async=1:first_pts=0",
-            "-g 60",
-            "-keyint_min 60",
+            "-af aresample=48000",
+            "-g 180",
+            "-keyint_min 180",
             "-sc_threshold 0",
-            "-hls_time 2",
+            "-flags +cgop",
+            "-video_track_timescale 90000",
+            "-hls_time 6",
             "-hls_list_size 0",
             "-hls_flags independent_segments",
+            "-hls_segment_type mpegts",
             `-hls_segment_filename ${path.join(segDir, "segment_%04d.ts")}`,
             "-f hls",
           ])
@@ -722,9 +739,10 @@ async function startServer() {
       // 3. Get duration by parsing the generated m3u8
       const m3u8Content = fs.readFileSync(m3u8Path, "utf-8");
       const extinfMatches: string[] = m3u8Content.match(/#EXTINF:([\d.]+)/g) || [];
-      const duration: number = extinfMatches.reduce((sum: number, line: string) => {
-        return sum + parseFloat(line.replace("#EXTINF:", ""));
-      }, 0);
+      const segmentDurations: number[] = extinfMatches.map((line: string) => {
+        return parseFloat(line.replace("#EXTINF:", ""));
+      });
+      const duration: number = segmentDurations.reduce((sum: number, dur: number) => sum + dur, 0);
 
       // 4. Upload segments to R2
       const files = fs.readdirSync(segDir);
@@ -736,7 +754,7 @@ async function startServer() {
           const fileContent = fs.readFileSync(filePath);
           await r2.send(new PutObjectCommand({
             Bucket: bucketName,
-            Key: `streams/${videoId}/${file}`,
+            Key: `${baseR2Path}/${file}`,
             Body: fileContent,
             ContentType: file.endsWith(".m3u8") ? "application/x-mpegURL" : "video/mp2t",
           }));
@@ -752,13 +770,14 @@ async function startServer() {
         try {
           await dbAdmin.collection("media").doc(mediaId).set({
             status: "ready",
-            m3u8Url: `${publicBaseUrl}/streams/${videoId}/index.m3u8`,
+            m3u8Url: `${publicBaseUrl}/${baseR2Path}/index.m3u8`,
             segmentCount,
+            segmentDurations,
             duration,
             segmentDuration: 6,
             segmentPrefix: "segment_",
             segmentPad: 4,
-            r2Path: `streams/${videoId}`,
+            r2Path: baseR2Path,
             bucketName,
           }, { merge: true });
           console.log("Firestore write successful");
@@ -787,9 +806,10 @@ async function startServer() {
         success: true,
         mediaId: mediaId || "new",
         segmentCount,
+        segmentDurations,
         duration,
-        m3u8Url: `${publicBaseUrl}/streams/${videoId}/index.m3u8`,
-        r2Path: `streams/${videoId}`,
+        m3u8Url: `${publicBaseUrl}/${baseR2Path}/index.m3u8`,
+        r2Path: baseR2Path,
       });
 
     } catch (err: any) {
@@ -907,7 +927,8 @@ async function startServer() {
               cfApiToken: manifestSettings.cfApiToken,
               channelSlug,
               manifestBucketUrl: manifestSettings.publicBaseUrl,
-              epoch
+              epoch,
+              workerBaseDomain: manifestSettings.workerBaseDomain
             });
             if (deployResult.success) {
               channelUpdate.workerDeployed = true;
@@ -918,8 +939,14 @@ async function startServer() {
             }
           } else {
             // If we don't redeploy, we still need to construct the correct worker URL
-            // We don't have the subdomain here easily, so we rely on the existing workerManifestUrl if available
-            const wUrl = channel.workerManifestUrl ? channel.workerManifestUrl.replace("/index.m3u8", "").replace("/live.m3u8", "") : `https://fastfasts-${channelSlug}.workers.dev`;
+            let wUrl = "";
+            if (manifestSettings.workerBaseDomain) {
+              const baseDomain = manifestSettings.workerBaseDomain.replace(/^https?:\/\//, '').replace(/\/$/, '');
+              wUrl = `https://${channelSlug}.${baseDomain}`;
+            } else {
+              // We don't have the subdomain here easily, so we rely on the existing workerManifestUrl if available
+              wUrl = channel.workerManifestUrl ? channel.workerManifestUrl.replace("/index.m3u8", "").replace("/live.m3u8", "") : `https://fastfasts-${channelSlug}.workers.dev`;
+            }
             channelUpdate.workerManifestUrl = `${wUrl}/index.m3u8`;
           }
 
@@ -1085,6 +1112,7 @@ export default {
         channelSlug,
         manifestBucketUrl: manifestSettings.publicBaseUrl,
         epoch,
+        workerBaseDomain: manifestSettings.workerBaseDomain
       });
 
       if (!deployResult.success) throw new Error(deployResult.error);
@@ -1225,12 +1253,30 @@ export default {
     // Start transcoding
     ffmpeg(inputPath)
       .outputOptions([
-        "-profile:v baseline",
-        "-level 3.0",
-        "-start_number 0",
-        "-hls_time 10",
+        "-c:v libx264",
+        "-profile:v high",
+        "-level 4.1",
+        "-pix_fmt yuv420p",
+        "-b:v 4000k",
+        "-maxrate 4500k",
+        "-bufsize 9000k",
+        "-vf scale=1920:1080:force_original_aspect_ratio=decrease,pad=1920:1080:(ow-iw)/2:(oh-ih)/2,fps=30",
+        "-c:a aac",
+        "-ar 48000",
+        "-ac 2",
+        "-b:a 128k",
+        "-af aresample=48000",
+        "-g 180",
+        "-keyint_min 180",
+        "-sc_threshold 0",
+        "-flags +cgop",
+        "-video_track_timescale 90000",
+        "-hls_time 6",
         "-hls_list_size 0",
-        "-f hls"
+        "-hls_flags independent_segments",
+        "-hls_segment_type mpegts",
+        `-hls_segment_filename ${path.join(outputDir, "segment_%04d.ts")}`,
+        "-f hls",
       ])
       .output(m3u8Path)
       .on("start", (commandLine) => {

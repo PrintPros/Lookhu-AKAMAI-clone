@@ -228,7 +228,7 @@ export function ArtistPortal() {
         <div className="max-w-5xl mx-auto flex items-center justify-between">
           <div className="flex items-center gap-3">
             <div className="h-10 w-10 bg-white text-black flex items-center justify-center rounded-lg font-black text-xl">F</div>
-            <h1 className="text-2xl font-black tracking-tighter">FastFasts <span className="text-zinc-500 font-medium tracking-normal text-sm ml-2">ARTIST PORTAL</span></h1>
+            <h1 className="text-2xl font-black tracking-tighter">FasterFasts <span className="text-zinc-500 font-medium tracking-normal text-sm ml-2">ARTIST PORTAL</span></h1>
           </div>
           <div className="hidden md:flex items-center gap-6 text-sm font-bold text-zinc-500 uppercase tracking-widest">
             <a href="#" className="hover:text-white transition-colors">Guidelines</a>
@@ -264,7 +264,7 @@ export function ArtistPortal() {
             <div className="space-y-4">
               <h2 className="text-5xl font-black tracking-tighter leading-none">SUBMIT YOUR <br/>MUSIC VIDEO.</h2>
               <p className="text-xl text-zinc-400 max-w-xl">
-                Join the FastFasts network. We broadcast the best independent music videos to thousands of viewers worldwide.
+                Join the FasterFasts network. We broadcast the best independent music videos to thousands of viewers worldwide.
               </p>
             </div>
 
@@ -398,7 +398,7 @@ export function ArtistPortal() {
                     className="mt-1 h-5 w-5 rounded border-zinc-800 bg-zinc-900 text-white focus:ring-white"
                   />
                   <span className="text-sm text-zinc-400 group-hover:text-zinc-300 transition-colors">
-                    I confirm that I own all necessary rights to this music video and grant FastFasts permission to broadcast it on their network.
+                    I confirm that I own all necessary rights to this music video and grant FasterFasts permission to broadcast it on their network.
                   </span>
                 </label>
 
@@ -423,7 +423,7 @@ export function ArtistPortal() {
       </main>
 
       <footer className="py-20 border-t border-zinc-900 text-center">
-        <p className="text-zinc-600 text-sm">© 2026 FastFasts. ALL RIGHTS RESERVED.</p>
+        <p className="text-zinc-600 text-sm">© 2026 FasterFasts. ALL RIGHTS RESERVED.</p>
       </footer>
     </div>
   );

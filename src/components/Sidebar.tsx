@@ -63,9 +63,9 @@ export function Sidebar({
   return (
     <div className="flex h-screen w-64 flex-col border-r border-zinc-200 bg-white p-4">
       <div className="mb-8 px-2 flex items-center gap-3">
-        <img src="/favicon.png" alt="FastFasts Logo" className="h-10 w-10" />
+        <img src="/favicon.png" alt="FasterFasts Logo" className="h-10 w-10" />
         <div>
-          <h1 className="text-xl font-black tracking-tight text-zinc-900 uppercase">FastFasts</h1>
+          <h1 className="text-xl font-black tracking-tight text-zinc-900 uppercase">FasterFasts</h1>
           <p className="text-[10px] text-zinc-500 uppercase tracking-[0.2em] font-bold mt-0.5">Fast Channel Platform</p>
         </div>
       </div>

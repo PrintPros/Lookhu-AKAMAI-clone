@@ -117,66 +117,32 @@ export function AdSettings() {
         Math.abs(curr - duration) < Math.abs(prev - duration) ? curr : prev
       );
 
-      // 1. Get active bucket config
-      const cfQ = query(
-        collection(db, "cloudflareConfigs"),
-        where("userId", "==", auth.currentUser?.uid),
-        where("isActive", "==", true),
-        limit(1)
-      );
-      const cfSnap = await getDocs(cfQ);
-      if (cfSnap.empty) {
-        setMessage({ type: "error", text: "No active R2 bucket connected." });
-        return;
-      }
-      const cfData = cfSnap.docs[0].data();
-      const configId = cfSnap.docs[0].id;
-
-      // 2. Get presigned URL
-      const idToken = await auth.currentUser!.getIdToken();
-      const mp4Key = `house-ads/${Date.now()}-${file.name.replace(/[^a-z0-9]/g, "-")}`;
+      // Call our new House Ad transcode pipeline
+      setMessage({ type: "info", text: "Uploading and transcoding house ad to HLS..." });
       
-      const presignResp = await fetch("/api/r2/presign-secure", {
-        method: "POST",
-        headers: {
-          "Content-Type": "application/json",
-          "Authorization": `Bearer ${idToken}`,
+      const { uploadHouseAdToR2 } = await import('../lib/uploader');
+      const adResponse = await uploadHouseAdToR2(
+        file,
+        {
+          name: file.name,
+          isAd: true,
+          snappedDuration
         },
-        body: JSON.stringify({
-          configId,
-          accountId: cfData.accountId,
-          r2AccessKeyId: cfData.r2AccessKeyId,
-          r2SecretAccessKey: cfData.r2SecretAccessKey,
-          bucketName: cfData.bucketName,
-          keys: [{ key: mp4Key, contentType: "video/mp4" }]
-        }),
-      });
-
-      if (!presignResp.ok) {
-        setMessage({ type: "error", text: "Failed to get upload URL" });
-        return;
-      }
-      const { urls } = await presignResp.json();
-      const { uploadUrl } = urls[0];
-
-      // 3. Upload MP4 to R2
-      const uploadResp = await fetch(uploadUrl, {
-        method: "PUT",
-        body: file,
-        headers: { "Content-Type": "video/mp4" },
-      });
-
-      if (!uploadResp.ok) {
-        setMessage({ type: "error", text: "Failed to upload video to R2" });
-        return;
-      }
+        (phase, percent, msg) => {
+          setMessage({ type: "info", text: msg });
+        }
+      );
 
       // 4. Update config
       const newAd = {
         id: Date.now().toString(),
         name: file.name,
         type: 'promo' as const,
-        url: `${cfData.publicBaseUrl}/${mp4Key}`,
+        url: adResponse.m3u8Url || `${adResponse.publicBaseUrl}/${adResponse.r2Path}/index.m3u8`,
+        r2Path: adResponse.r2Path,
+        bucketName: adResponse.bucketName,
+        segmentCount: adResponse.segmentCount,
+        segmentDurations: adResponse.segmentDurations,
         duration: snappedDuration, 
         actualDuration: duration,
         weight: 5
@@ -189,7 +155,7 @@ export function AdSettings() {
         return updated;
       });
       
-      setMessage({ type: "success", text: "House ad uploaded successfully." });
+      setMessage({ type: "success", text: "House ad uploaded and transcoded to HLS successfully!" });
     } catch (error) {
       console.error(error);
       setMessage({ type: "error", text: "Failed to upload house ad." });
@@ -216,11 +182,11 @@ export function AdSettings() {
         const cfData = cfSnap.docs[0].data();
         const idToken = await auth.currentUser!.getIdToken();
         
-        // Extract key from URL
         const urlParts = adToRemove.url.split("/");
-        const key = `house-ads/${urlParts[urlParts.length - 1]}`;
+        // Extract folder prefix
+        const prefix = adToRemove.r2Path || `ads/${urlParts[urlParts.length - 2]}`;
 
-        await fetch("/api/r2/delete-file", {
+        await fetch("/api/r2/delete-folder", {
           method: "POST",
           headers: {
             "Content-Type": "application/json",
@@ -231,7 +197,7 @@ export function AdSettings() {
             r2AccessKeyId: cfData.r2AccessKeyId,
             r2SecretAccessKey: cfData.r2SecretAccessKey,
             bucketName: cfData.bucketName,
-            key
+            prefix
           }),
         });
       }
@@ -484,7 +450,7 @@ export function AdSettings() {
             </div>
             <div className="space-y-2">
               <div className="text-zinc-500 text-xs font-bold uppercase">Compliance</div>
-              <p className="text-sm text-zinc-300">Ensure your ad tags are CORS-enabled for the FastFasts domain to prevent playback errors.</p>
+              <p className="text-sm text-zinc-300">Ensure your ad tags are CORS-enabled for the FasterFasts domain to prevent playback errors.</p>
             </div>
           </div>
 

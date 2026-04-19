@@ -9,7 +9,7 @@ export interface Media {
   createdAt: string;
   userId: string;
   public?: boolean;
-  // FastFasts music video fields (all optional so existing code still compiles)
+  // FasterFasts music video fields (all optional so existing code still compiles)
   artistName?: string;
   songTitle?: string;
   genre?: string;             // "hiphop" | "rock" | "edm" | "rnb" | "latin" | "other"
@@ -25,6 +25,7 @@ export interface Media {
   bucketName?: string;         // which R2 bucket this lives in
   r2Path?: string;             // e.g. "streams/abc123"
   segmentCount?: number;       // total .ts segments
+  segmentDurations?: number[]; // array of exact segment durations (e.g. [6, 6, 2.34])
   segmentPrefix?: string;      // "segment_"
   segmentPad?: number;         // 4
   segmentDuration?: number;    // seconds per segment (6)
@@ -152,6 +153,10 @@ export interface AdConfig {
     name: string;
     type: 'station_id' | 'promo' | 'fallback';
     url: string;
+    r2Path?: string;
+    bucketName?: string;
+    segmentCount?: number;
+    segmentDurations?: number[];
     duration: number;
     weight: number;
   }>;
@@ -165,8 +170,10 @@ export interface ManifestProgram {
   publicBaseUrl: string;
   path: string;
   segments: number;
+  segmentDurations?: number[];
   prefix: string;
   pad: number;
+  isAdBreak?: boolean;
   adBreakAfter?: boolean;
   breakDurationSeconds?: number;
   adUrl?: string; // URL of the ad to play

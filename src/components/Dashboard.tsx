@@ -129,7 +129,7 @@ export function Dashboard({ profile }: { profile: any }) {
     <div className="space-y-8">
       <div>
         <h2 className="text-2xl font-bold tracking-tight text-zinc-900 font-sans">Dashboard Overview</h2>
-        <p className="text-zinc-500">Welcome back to the FastFasts Platform.</p>
+        <p className="text-zinc-500">Welcome back to the FasterFasts Platform.</p>
       </div>
 
       <div className="grid gap-4 md:grid-cols-2 lg:grid-cols-5">

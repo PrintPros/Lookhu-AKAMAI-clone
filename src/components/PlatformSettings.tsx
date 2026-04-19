@@ -42,7 +42,7 @@ export function PlatformSettings({ profile }: PlatformSettingsProps) {
     <div className="space-y-8 pb-12">
       <div>
         <h2 className="text-2xl font-bold tracking-tight text-zinc-900 font-sans">Platform Settings</h2>
-        <p className="text-zinc-500">Configure your FastFasts instance and monitor system health.</p>
+        <p className="text-zinc-500">Configure your FasterFasts instance and monitor system health.</p>
       </div>
 
       <div className="grid gap-6 md:grid-cols-2">

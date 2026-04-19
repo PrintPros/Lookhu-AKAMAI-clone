@@ -43,6 +43,7 @@ async function deployChannelWorker(params) {
     );
     const result = await response.json();
     if (!result.success) {
+      console.error("Cloudflare API error:", JSON.stringify(result));
       return { success: false, error: result.errors?.[0]?.message || "Failed to upload script" };
     }
     await fetch(
@@ -56,20 +57,61 @@ async function deployChannelWorker(params) {
         body: JSON.stringify({ enabled: true })
       }
     );
-    const subdomainResponse = await fetch(
-      `https://api.cloudflare.com/client/v4/accounts/${accountId}/workers/subdomain`,
-      {
-        headers: { "Authorization": `Bearer ${cfApiToken}` }
+    let workerUrl = "";
+    if (params.workerBaseDomain) {
+      const baseDomain = params.workerBaseDomain.replace(/^https?:\/\//, "").replace(/\/$/, "");
+      const hostname = `${channelSlug}.${baseDomain}`;
+      workerUrl = `https://${hostname}`;
+      let zoneId = "";
+      try {
+        const zoneRes = await fetch(
+          `https://api.cloudflare.com/client/v4/zones?name=${baseDomain}`,
+          { headers: { "Authorization": `Bearer ${cfApiToken}` } }
+        );
+        const zoneData = await zoneRes.json();
+        if (zoneData.success && zoneData.result && zoneData.result.length > 0) {
+          zoneId = zoneData.result[0].id;
+        }
+      } catch (e) {
+        console.warn("Could not auto-discover Zone ID for custom domain:", e);
       }
-    );
-    const subdomainResult = await subdomainResponse.json();
-    const subdomain = subdomainResult.result?.subdomain;
-    if (!subdomain) {
-      return { success: false, error: "Cloudflare Workers subdomain not set for this account." };
+      if (zoneId) {
+        await fetch(
+          `https://api.cloudflare.com/client/v4/accounts/${accountId}/workers/domains`,
+          {
+            method: "PUT",
+            headers: {
+              "Authorization": `Bearer ${cfApiToken}`,
+              "Content-Type": "application/json"
+            },
+            body: JSON.stringify({
+              environment: "production",
+              hostname,
+              service: scriptName,
+              zone_id: zoneId
+            })
+          }
+        );
+      } else {
+        console.warn(`Could not set up custom domain automatically. Zone ID for ${baseDomain} not found or token lacks permissions.`);
+      }
+    } else {
+      const subdomainResponse = await fetch(
+        `https://api.cloudflare.com/client/v4/accounts/${accountId}/workers/subdomain`,
+        {
+          headers: { "Authorization": `Bearer ${cfApiToken}` }
+        }
+      );
+      const subdomainResult = await subdomainResponse.json();
+      const subdomain = subdomainResult.result?.subdomain;
+      if (!subdomain) {
+        return { success: false, error: "Cloudflare Workers subdomain not set for this account." };
+      }
+      workerUrl = `https://${scriptName}.${subdomain}.workers.dev`;
     }
     return {
       success: true,
-      workerUrl: `https://${scriptName}.${subdomain}.workers.dev`
+      workerUrl
     };
   } catch (error) {
     return { success: false, error: error.message };
@@ -306,11 +348,19 @@ async function handlePlaylist(request, env, ctx, corsHeaders) {
 
       // Detect program boundary
       const isProgramBoundary = lastProgram !== null && program.id !== lastProgram.id;
+      
       if (isProgramBoundary) {
         playlist += '#EXT-X-DISCONTINUITY\\n';
-        if (lastProgram.adBreakAfter && manifest.adConfig?.enabled) {
-          const breakDuration = manifest.adConfig.breakDurationSeconds || 30;
-          const breakId = \`ad-break-\${lastProgram.id}-\${seq}\`;
+        
+        // Did we just end an ad break and return to content?
+        if (lastProgram.isAdBreak && !program.isAdBreak) {
+          playlist += '#EXT-X-CUE-IN\\n';
+        }
+        
+        // Are we starting an ad break now?
+        if (!lastProgram.isAdBreak && program.isAdBreak && manifest.adConfig?.enabled) {
+          const breakDuration = program.breakDurationSeconds || manifest.adConfig.breakDurationSeconds || 30;
+          const breakId = \`ad-break-\${program.id}-\${seq}\`;
           playlist += \`#EXT-X-DATERANGE:ID="\${breakId}",START-DATE="\${new Date().toISOString()}",DURATION=\${breakDuration},SCTE35-OUT=0xFC00\\n\`;
           playlist += \`#EXT-X-CUE-OUT:\${breakDuration}\\n\`;
         }
@@ -380,7 +430,7 @@ async function handleEPG(env, ctx, corsHeaders) {
 
     const channelId = \`fastfasts-\${env.CHANNEL_SLUG}\`;
     let xml = '<?xml version="1.0" encoding="UTF-8"?>\\n';
-    xml += '<tv generator-info-name="FastFasts">\\n';
+    xml += '<tv generator-info-name="FasterFasts">\\n';
     xml += \`  <channel id="\${channelId}">\\n\`;
     xml += \`    <display-name>\${env.CHANNEL_SLUG}</display-name>\\n\`;
     xml += \`  </channel>\\n\`;
@@ -517,23 +567,44 @@ function buildManifest(channel, playlist, mediaItems, cloudflareConfigs, adConfi
   const programs = [];
   for (let i = 0; i < playlist.items.length; i++) {
     const item = playlist.items[i];
-    if (item.isAdBreak) continue;
+    if (item.isAdBreak) {
+      if (adConfig.enabled && adConfig.houseAds && adConfig.houseAds.length > 0) {
+        const breakDurationSeconds = item.duration || adConfig.breakDurationSeconds || 30;
+        const matchingAds = adConfig.houseAds.filter((a) => a.duration === breakDurationSeconds);
+        const ad = matchingAds.length > 0 ? matchingAds[0] : adConfig.houseAds[0];
+        if (ad.r2Path && ad.bucketName && ad.segmentCount) {
+          totalDurationSeconds += ad.duration;
+          const config2 = cloudflareConfigs.find((c) => c.bucketName === ad.bucketName) || cloudflareConfigs.find((c) => c.isActive);
+          programs.push({
+            id: `ad-${slugify(ad.name)}-${item.id}`,
+            bucket: ad.bucketName,
+            publicBaseUrl: config2?.publicBaseUrl || "",
+            path: ad.r2Path,
+            segments: ad.segmentCount,
+            prefix: "segment_",
+            pad: 4,
+            isAdBreak: true,
+            breakDurationSeconds
+          });
+        }
+      }
+      continue;
+    }
     const m = readyMedia.find((m2) => m2.id === item.mediaId);
     if (!m) continue;
     const config = cloudflareConfigs.find((c) => c.bucketName === m.bucketName) || cloudflareConfigs.find((c) => c.isActive);
     const duration = m.duration || 0;
     totalDurationSeconds += duration;
-    const nextItem = playlist.items[i + 1];
-    const adBreakAfter = !!nextItem?.isAdBreak;
     programs.push({
       id: m.artistName && m.songTitle ? slugify(`${m.artistName}-${m.songTitle}`) : m.r2Path?.split("/").pop() || m.id,
       bucket: m.bucketName || config?.bucketName || "",
       publicBaseUrl: config?.publicBaseUrl || "",
       path: m.r2Path || `streams/${m.name}`,
+      // Should map to streams/[videoId]
       segments: m.segmentCount || 0,
       prefix: m.segmentPrefix || "segment_",
       pad: m.segmentPad || 4,
-      adBreakAfter
+      isAdBreak: false
     });
   }
   return {
@@ -649,6 +720,7 @@ async function startServer() {
   });
   const upload = multer({ storage });
   app.get("/api/health", (req, res) => {
+    const transcodingWorking = !!ffmpeg.getAvailableFormats;
     res.json({
       status: "ok",
       firebase: {
@@ -656,6 +728,9 @@ async function startServer() {
         projectId: firebaseConfig.projectId,
         dbAdmin: !!dbAdmin,
         authAdmin: !!authAdmin
+      },
+      transcoding: {
+        working: transcodingWorking
       }
     });
   });
@@ -853,6 +928,27 @@ async function startServer() {
         continuationToken = list.IsTruncated ? list.NextContinuationToken : void 0;
       } while (continuationToken);
       res.json({ success: true, deleted });
+    } catch (err) {
+      res.status(500).json({ success: false, error: err.message });
+    }
+  });
+  app.post("/api/r2/delete-file", async (req, res) => {
+    const authHeader = req.headers.authorization;
+    if (!authHeader || !authHeader.startsWith("Bearer ")) {
+      return res.status(401).json({ error: "Unauthorized" });
+    }
+    const idToken = authHeader.split("Bearer ")[1];
+    if (!idToken || idToken.length < 20) {
+      return res.status(401).json({ error: "Invalid token" });
+    }
+    const { accountId, r2AccessKeyId, r2SecretAccessKey, bucketName, key } = req.body;
+    if (!accountId || !r2AccessKeyId || !r2SecretAccessKey || !bucketName || !key) {
+      return res.status(400).json({ error: "Missing fields" });
+    }
+    try {
+      const r2 = createR2Client(accountId, r2AccessKeyId, r2SecretAccessKey);
+      await r2.send(new DeleteObjectCommand({ Bucket: bucketName, Key: key }));
+      res.json({ success: true });
     } catch (err) {
       res.status(500).json({ success: false, error: err.message });
     }
@@ -1154,19 +1250,27 @@ async function startServer() {
       await new Promise((resolve, reject) => {
         ffmpeg(rawPath).outputOptions([
           "-c:v libx264",
-          "-profile:v baseline",
-          "-level 3.0",
+          "-profile:v high",
+          "-level 4.1",
+          "-pix_fmt yuv420p",
+          "-b:v 4000k",
+          "-maxrate 4500k",
+          "-bufsize 9000k",
+          "-vf scale=1920:1080:force_original_aspect_ratio=decrease,pad=1920:1080:(ow-iw)/2:(oh-ih)/2,fps=30",
           "-c:a aac",
-          "-ar 44100",
+          "-ar 48000",
           "-ac 2",
           "-b:a 128k",
-          "-af aresample=async=1:first_pts=0",
-          "-vf scale=-2:720",
-          "-force_key_frames expr:gte(t,n_forced*6)",
-          "-crf 23",
-          "-preset fast",
+          "-af aresample=48000",
+          "-g 180",
+          "-keyint_min 180",
+          "-sc_threshold 0",
+          "-flags +cgop",
+          "-video_track_timescale 90000",
           "-hls_time 6",
           "-hls_list_size 0",
+          "-hls_flags independent_segments",
+          "-hls_segment_type mpegts",
           `-hls_segment_filename ${path.join(segDir, "segment_%04d.ts")}`,
           "-f hls"
         ]).output(m3u8Path).on("end", () => resolve()).on("error", (err) => reject(err)).run();
@@ -1275,7 +1379,8 @@ async function startServer() {
             midRollUrl: adSettingsData?.midRollUrl || "",
             enabled: adSettingsData?.enabled || false,
             adPodSize: adSettingsData?.adPodSize || adSettingsData?.midRollFrequency || 2,
-            breakDurationSeconds: adSettingsData?.breakDurationSeconds || 30
+            breakDurationSeconds: adSettingsData?.breakDurationSeconds || 30,
+            houseAds: adSettingsData?.houseAds || []
           };
           const manifest = buildManifest(channel, playlist, mediaItems, cfConfigs, adConfig);
           const validation = validateManifest(manifest);
@@ -1298,7 +1403,7 @@ async function startServer() {
             CacheControl: "no-store"
           }));
           const epoch = Math.floor(Date.now() / 1e3);
-          const workerUrl = `https://rag-${channelSlug}.${activeConfig.accountId}.workers.dev`;
+          const workerUrl = `https://rag-${channelSlug}.${manifestSettings.accountId}.workers.dev`;
           const channelUpdate = {
             lastPublishedAt: (/* @__PURE__ */ new Date()).toISOString(),
             workerManifestUrl: `${workerUrl}/index.m3u8`,
@@ -1306,11 +1411,12 @@ async function startServer() {
           };
           if (channel.workerNeedsRedeploy) {
             const deployResult = await deployChannelWorker({
-              accountId: activeConfig.accountId,
-              cfApiToken: activeConfig.cfApiToken,
+              accountId: manifestSettings.accountId,
+              cfApiToken: manifestSettings.cfApiToken,
               channelSlug,
               manifestBucketUrl: manifestSettings.publicBaseUrl,
-              epoch
+              epoch,
+              workerBaseDomain: manifestSettings.workerBaseDomain
             });
             if (deployResult.success) {
               channelUpdate.workerDeployed = true;
@@ -1319,6 +1425,15 @@ async function startServer() {
             } else {
               errors.push(`Worker deploy failed for ${channelSlug}: ${deployResult.error}`);
             }
+          } else {
+            let wUrl = "";
+            if (manifestSettings.workerBaseDomain) {
+              const baseDomain = manifestSettings.workerBaseDomain.replace(/^https?:\/\//, "").replace(/\/$/, "");
+              wUrl = `https://${channelSlug}.${baseDomain}`;
+            } else {
+              wUrl = channel.workerManifestUrl ? channel.workerManifestUrl.replace("/index.m3u8", "").replace("/live.m3u8", "") : `https://fastfasts-${channelSlug}.workers.dev`;
+            }
+            channelUpdate.workerManifestUrl = `${wUrl}/index.m3u8`;
           }
           await dbAdmin.collection("channels").doc(channel.id).update(channelUpdate);
           await dbAdmin.collection("scheduledPublishes").doc(publish.id).update({
@@ -1401,6 +1516,14 @@ export default {
       return res.status(400).json({ error: "Missing required fields" });
     }
     try {
+      const decodedToken = await authAdmin.verifyIdToken(idToken);
+      const requesterUid = decodedToken.uid;
+      const userDoc = await dbAdmin.collection("users").doc(requesterUid).get();
+      const userData = userDoc.exists ? userDoc.data() : null;
+      const isMasterAdmin2 = userData?.role === "master_admin" || ["lookhumaster@gmail.com", "rpduece@gmail.com"].includes(decodedToken.email);
+      if (!isMasterAdmin2 && (userData?.accountId !== channel.accountId && requesterUid !== channel.userId)) {
+        return res.status(403).json({ error: "Forbidden: You do not have permission to publish this channel." });
+      }
       const manifestSettingsSnap = await dbAdmin.collection("settings").doc("manifest").get();
       const manifestSettings = manifestSettingsSnap.exists ? manifestSettingsSnap.data() : null;
       if (!manifestSettings?.r2AccessKeyId) throw new Error("Manifest bucket not configured in Settings");
@@ -1412,7 +1535,8 @@ export default {
         midRollUrl: adSettingsData?.midRollUrl || "",
         enabled: adSettingsData?.enabled || false,
         adPodSize: adSettingsData?.adPodSize || adSettingsData?.midRollFrequency || 2,
-        breakDurationSeconds: adSettingsData?.breakDurationSeconds || 30
+        breakDurationSeconds: adSettingsData?.breakDurationSeconds || 30,
+        houseAds: adSettingsData?.houseAds || []
       };
       const manifest = buildManifest(channel, playlist, mediaItems || [], [cfConfig], adConfig);
       const validation = validateManifest(manifest);
@@ -1436,15 +1560,16 @@ export default {
       const epoch = Math.floor(Date.now() / 1e3);
       const { deployChannelWorker: deployChannelWorker2 } = await Promise.resolve().then(() => (init_workerDeployer(), workerDeployer_exports));
       const deployResult = await deployChannelWorker2({
-        accountId: cfConfig.accountId,
-        cfApiToken: cfConfig.cfApiToken || cfConfig.apiToken,
+        accountId: manifestSettings.accountId,
+        cfApiToken: manifestSettings.cfApiToken,
         channelSlug,
         manifestBucketUrl: manifestSettings.publicBaseUrl,
-        epoch
+        epoch,
+        workerBaseDomain: manifestSettings.workerBaseDomain
       });
       if (!deployResult.success) throw new Error(deployResult.error);
       try {
-        const pagesUrl = await deployEmbedPlayer(cfConfig.accountId, cfConfig.cfApiToken || cfConfig.apiToken);
+        const pagesUrl = await deployEmbedPlayer(manifestSettings.accountId, manifestSettings.cfApiToken);
         await dbAdmin.collection("settings").doc("embedPlayer").set({ pagesUrl });
       } catch (err) {
         console.error("Embed deploy failed:", err);
@@ -1474,6 +1599,35 @@ export default {
       const result = await deployChannelWorker2(req.body);
       res.json(result);
     } catch (err) {
+      res.status(500).json({ success: false, error: err.message });
+    }
+  });
+  app.delete("/api/deploy/channel/:slug", async (req, res) => {
+    try {
+      const { slug } = req.params;
+      const authHeader = req.headers.authorization;
+      if (!authHeader?.startsWith("Bearer ")) {
+        return res.status(401).json({ error: "Unauthorized" });
+      }
+      const idToken = authHeader.split("Bearer ")[1];
+      await authAdmin.verifyIdToken(idToken);
+      const settingsDoc = await dbAdmin.collection("settings").doc("masterApi").get();
+      if (!settingsDoc.exists) {
+        return res.status(400).json({ error: "Master API settings not configured" });
+      }
+      const manifestSettings = settingsDoc.data();
+      if (!manifestSettings?.accountId || !manifestSettings?.cfApiToken) {
+        return res.status(400).json({ error: "Cloudflare credentials missing in Master API settings" });
+      }
+      const { deleteChannelWorker: deleteChannelWorker2 } = await Promise.resolve().then(() => (init_workerDeployer(), workerDeployer_exports));
+      const result = await deleteChannelWorker2(
+        manifestSettings.accountId,
+        manifestSettings.cfApiToken,
+        slug
+      );
+      res.json(result);
+    } catch (err) {
+      console.error("Delete Channel Worker Error:", err);
       res.status(500).json({ success: false, error: err.message });
     }
   });
@@ -1525,11 +1679,29 @@ export default {
     const m3u8Path = path.join(outputDir, "index.m3u8");
     console.log("Starting transcoding for:", fileId);
     ffmpeg(inputPath).outputOptions([
-      "-profile:v baseline",
-      "-level 3.0",
-      "-start_number 0",
-      "-hls_time 10",
+      "-c:v libx264",
+      "-profile:v high",
+      "-level 4.1",
+      "-pix_fmt yuv420p",
+      "-b:v 4000k",
+      "-maxrate 4500k",
+      "-bufsize 9000k",
+      "-vf scale=1920:1080:force_original_aspect_ratio=decrease,pad=1920:1080:(ow-iw)/2:(oh-ih)/2,fps=30",
+      "-c:a aac",
+      "-ar 48000",
+      "-ac 2",
+      "-b:a 128k",
+      "-af aresample=48000",
+      "-g 180",
+      "-keyint_min 180",
+      "-sc_threshold 0",
+      "-flags +cgop",
+      "-video_track_timescale 90000",
+      "-hls_time 6",
       "-hls_list_size 0",
+      "-hls_flags independent_segments",
+      "-hls_segment_type mpegts",
+      `-hls_segment_filename ${path.join(outputDir, "segment_%04d.ts")}`,
       "-f hls"
     ]).output(m3u8Path).on("start", (commandLine) => {
       console.log("Spawned Ffmpeg with command: " + commandLine);

@@ -1,5 +1,5 @@
 {
-  "name": "FastFasts",
-  "description": "Professional music video playout platform for FastFasts, featuring automated transcoding, artist submissions, and multi-channel HLS stream management.",
+  "name": "FasterFasts",
+  "description": "Professional music video playout platform for FasterFasts, featuring automated transcoding, artist submissions, and multi-channel HLS stream management.",
   "requestFramePermissions": []
 }

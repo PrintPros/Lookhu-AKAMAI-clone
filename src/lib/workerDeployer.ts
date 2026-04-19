@@ -54,24 +54,52 @@ async function getManifest(env, ctx) {
 
 function getCurrentPosition(manifest, env) {
   const epoch = parseInt(env.EPOCH || "0");
-  const now = Math.floor(Date.now() / 1000);
-  const elapsed = now - epoch;
-  const segDur = manifest.segmentDuration || 6;
+  // Using exact milliseconds divided by 1000 for precision tracking
+  const nowMs = Date.now();
+  const elapsed = (nowMs - (epoch * 1000)) / 1000;
+  const defaultSegDur = manifest.segmentDuration || 6;
 
   const allSegments = [];
+  const segDurs = [];
+  let loopDuration = 0;
+  let maxSegDur = defaultSegDur;
+
   for (const program of manifest.programs) {
     for (let i = 0; i < program.segments; i++) {
       allSegments.push({ program, segIndex: i });
+      let dur = defaultSegDur;
+      if (program.segmentDurations && program.segmentDurations.length > i) {
+        dur = program.segmentDurations[i];
+      }
+      segDurs.push(dur);
+      loopDuration += dur;
+      if (dur > maxSegDur) maxSegDur = dur;
     }
   }
 
   const totalSegments = allSegments.length;
-  const loopDuration = totalSegments * segDur;
-  const loopPosition = elapsed % loopDuration;
-  const currentFlatIndex = Math.floor(loopPosition / segDur);
-  const globalSeq = Math.floor(elapsed / segDur);
+  // Fallback if loopDuration somehow is 0 or negative
+  if (loopDuration <= 0) loopDuration = totalSegments * defaultSegDur;
 
-  return { allSegments, totalSegments, currentFlatIndex, globalSeq, now, epoch, elapsed, segDur, loopDuration };
+  const loopPosition = elapsed % loopDuration;
+
+  let currentFlatIndex = 0;
+  let accumulated = 0;
+  for (let i = 0; i < totalSegments; i++) {
+    if (accumulated + segDurs[i] > loopPosition) {
+      currentFlatIndex = i;
+      break;
+    }
+    accumulated += segDurs[i];
+  }
+
+  const globalLoops = Math.floor(elapsed / loopDuration);
+  const globalSeq = (globalLoops * totalSegments) + currentFlatIndex;
+  
+  // Math.ceil the max seg duration for HLS spec TARGETDURATION
+  const targetDuration = Math.ceil(maxSegDur);
+
+  return { allSegments, segDurs, totalSegments, currentFlatIndex, globalSeq, now: Math.floor(nowMs/1000), epoch, elapsed, targetDuration, loopDuration };
 }
 
 async function handlePlaylist(request, env, ctx, corsHeaders) {
@@ -79,7 +107,7 @@ async function handlePlaylist(request, env, ctx, corsHeaders) {
 
   try {
     const manifest = await getManifest(env, ctx);
-    const { allSegments, totalSegments, currentFlatIndex, globalSeq, now, segDur } = getCurrentPosition(manifest, env);
+    const { allSegments, segDurs, totalSegments, currentFlatIndex, globalSeq, now, targetDuration } = getCurrentPosition(manifest, env);
 
     if (totalSegments === 0) {
       return new Response("#EXTM3U\\n# No content", {
@@ -93,7 +121,7 @@ async function handlePlaylist(request, env, ctx, corsHeaders) {
 
     let playlist = "#EXTM3U\\n";
     playlist += "#EXT-X-VERSION:3\\n";
-    playlist += \`#EXT-X-TARGETDURATION:\${segDur}\\n\`;
+    playlist += \`#EXT-X-TARGETDURATION:\${targetDuration}\\n\`;
     playlist += \`#EXT-X-MEDIA-SEQUENCE:\${startSeq}\\n\`;
 
  // Count discontinuities per full loop including wrap boundary
@@ -125,21 +153,39 @@ async function handlePlaylist(request, env, ctx, corsHeaders) {
 
       // Detect program boundary
       const isProgramBoundary = lastProgram !== null && program.id !== lastProgram.id;
+      
       if (isProgramBoundary) {
         playlist += '#EXT-X-DISCONTINUITY\\n';
-        if (lastProgram.adBreakAfter && manifest.adConfig?.enabled) {
-          const breakDuration = lastProgram.breakDurationSeconds || manifest.adConfig.breakDurationSeconds || 30;
-          const breakId = \`ad-break-\${lastProgram.id}-\${seq}\`;
-          playlist += \`#EXT-X-DATERANGE:ID="\${breakId}",START-DATE="\${new Date().toISOString()}",DURATION=\${breakDuration},SCTE35-OUT=0xFC00\\n\`;
-          playlist += \`#EXT-X-CUE-OUT:\${breakDuration}\\n\`;
+        
+        // Did we just end an ad break and return to content?
+        if (lastProgram.isAdBreak && !program.isAdBreak) {
+          playlist += '#EXT-X-CUE-IN\\n';
+        }
+        
+        // Are we starting an ad break now?
+        // Note: For SCTE-35 to validate properly, the DURATION must EXACTLY match the sum of the inner #EXTINF segments
+        if (!lastProgram.isAdBreak && program.isAdBreak && manifest.adConfig?.enabled) {
+          // Calculate the EXACT duration of the ad segments based on segment durations array
+          let exactAdDuration = 0;
+          if (program.segmentDurations && program.segmentDurations.length > 0) {
+            exactAdDuration = program.segmentDurations.reduce((a,b) => a+b, 0);
+          } else {
+            // fallback (legacy)
+            exactAdDuration = program.segments * targetDuration;
+          }
+          const breakId = \`ad-break-\${program.id}-\${seq}\`;
+          playlist += \`#EXT-X-DATERANGE:ID="\${breakId}",START-DATE="\${new Date().toISOString()}",DURATION=\${exactAdDuration.toFixed(3)},SCTE35-OUT=0xFC00\\n\`;
+          playlist += \`#EXT-X-CUE-OUT:\${exactAdDuration.toFixed(3)}\\n\`;
         }
       }
 
       const pad = program.pad || 4;
       const prefix = program.prefix || "segment_";
       const segNum = segIndex.toString().padStart(pad, "0");
+      
+      const exactSegmentDur = segDurs[flatIndex];
 
-      playlist += \`#EXTINF:\${segDur}.000,\\n\`;
+      playlist += \`#EXTINF:\${exactSegmentDur.toFixed(3)},\\n\`;
       playlist += \`/segments/\${program.id}/\${prefix}\${segNum}.ts\\n\`;
 
       lastProgram = program;
@@ -164,7 +210,7 @@ async function handlePlaylist(request, env, ctx, corsHeaders) {
 async function handleNow(env, ctx, corsHeaders) {
   try {
     const manifest = await getManifest(env, ctx);
-    const { allSegments, currentFlatIndex, segDur, now } = getCurrentPosition(manifest, env);
+    const { allSegments, currentFlatIndex, targetDuration, now } = getCurrentPosition(manifest, env);
     const { program, segIndex } = allSegments[currentFlatIndex];
     return new Response(JSON.stringify({
       now,
@@ -185,7 +231,8 @@ async function handleNow(env, ctx, corsHeaders) {
 async function handleEPG(env, ctx, corsHeaders) {
   try {
     const manifest = await getManifest(env, ctx);
-    const { allSegments, totalSegments, epoch, segDur } = getCurrentPosition(manifest, env);
+    const { allSegments, totalSegments, epoch, targetDuration } = getCurrentPosition(manifest, env);
+    const segDur = manifest.segmentDuration || targetDuration || 6;
 
     if (totalSegments === 0) {
       return new Response('<?xml version="1.0"?><tv></tv>', {
@@ -199,7 +246,7 @@ async function handleEPG(env, ctx, corsHeaders) {
 
     const channelId = \`fastfasts-\${env.CHANNEL_SLUG}\`;
     let xml = '<?xml version="1.0" encoding="UTF-8"?>\\n';
-    xml += '<tv generator-info-name="FastFasts">\\n';
+    xml += '<tv generator-info-name="FasterFasts">\\n';
     xml += \`  <channel id="\${channelId}">\\n\`;
     xml += \`    <display-name>\${env.CHANNEL_SLUG}</display-name>\\n\`;
     xml += \`  </channel>\\n\`;
@@ -207,23 +254,55 @@ async function handleEPG(env, ctx, corsHeaders) {
     let t = windowStart;
     while (t < windowEnd) {
       const elapsed = t - epoch;
-      const loopDuration = totalSegments * segDur;
+      
+      let loopDuration = 0;
+      for (const p of manifest.programs) {
+        if (p.segmentDurations) {
+          loopDuration += p.segmentDurations.reduce((a,b)=>a+b, 0);
+        } else {
+          loopDuration += p.segments * segDur;
+        }
+      }
+      if (loopDuration <= 0) break;
+      
       const loopPos = ((elapsed % loopDuration) + loopDuration) % loopDuration;
-      const flatIndex = Math.floor(loopPos / segDur);
-      const { program } = allSegments[flatIndex];
-      const programDuration = program.segments * segDur;
+      
+      let accumulated = 0;
+      let currentProgram = manifest.programs[0];
+      for (const p of manifest.programs) {
+        let pDur = 0;
+        if (p.segmentDurations) {
+          pDur = p.segmentDurations.reduce((a,b)=>a+b,0);
+        } else {
+          pDur = p.segments * segDur;
+        }
+        if (accumulated + pDur > loopPos) {
+          currentProgram = p;
+          break;
+        }
+        accumulated += pDur;
+      }
+      
+      let programDuration = 0;
+      if (currentProgram.segmentDurations) {
+        programDuration = currentProgram.segmentDurations.reduce((a,b)=>a+b,0);
+      } else {
+        programDuration = currentProgram.segments * segDur;
+      }
 
       const startStr = new Date(t * 1000).toISOString().replace(/[-:]/g, "").replace("T", "").split(".")[0] + " +0000";
       const endStr = new Date((t + programDuration) * 1000).toISOString().replace(/[-:]/g, "").replace("T", "").split(".")[0] + " +0000";
 
-      xml += \`  <programme start="\${startStr}" stop="\${endStr}" channel="\${channelId}">\\n\`;
-      xml += \`    <title>\${(program.songTitle || program.id).replace(/&/g, "&amp;")}</title>\\n\`;
-      xml += \`    <desc>\${(program.artistName || "Unknown Artist").replace(/&/g, "&amp;")}</desc>\\n\`;
-      xml += \`    <category>Music</category>\\n\`;
-      if (program.thumbnailUrl) {
-        xml += \`    <icon src="\${program.thumbnailUrl}" />\\n\`;
+      if (!currentProgram.isAdBreak) {
+        xml += \`  <programme start="\${startStr}" stop="\${endStr}" channel="\${channelId}">\\n\`;
+        xml += \`    <title>\${(currentProgram.songTitle || currentProgram.id).replace(/&/g, "&amp;")}</title>\\n\`;
+        xml += \`    <desc>\${(currentProgram.artistName || "Unknown Artist").replace(/&/g, "&amp;")}</desc>\\n\`;
+        xml += \`    <category>Music</category>\\n\`;
+        if (currentProgram.thumbnailUrl) {
+          xml += \`    <icon src="\${currentProgram.thumbnailUrl}" />\\n\`;
+        }
+        xml += \`  </programme>\\n\`;
       }
-      xml += \`  </programme>\\n\`;
 
       t += programDuration;
     }
@@ -303,6 +382,7 @@ export async function deployChannelWorker(params: {
   channelSlug: string;
   manifestBucketUrl: string;
   epoch: number;
+  workerBaseDomain?: string;
 }) {
   const { accountId, cfApiToken, channelSlug, manifestBucketUrl, epoch } = params;
   const scriptName = `fastfasts-${channelSlug}`;
@@ -341,7 +421,8 @@ export async function deployChannelWorker(params: {
       return { success: false, error: result.errors?.[0]?.message || "Failed to upload script" };
     }
 
-    // 4. Enable workers.dev subdomain route
+    // 4. Enable workers.dev subdomain route or custom domain route
+    // First, always enable workers.dev route as a backup
     await fetch(
       `https://api.cloudflare.com/client/v4/accounts/${accountId}/workers/scripts/${scriptName}/subdomain`,
       {
@@ -354,23 +435,71 @@ export async function deployChannelWorker(params: {
       }
     );
 
-    // 5. Get account subdomain to construct URL
-    const subdomainResponse = await fetch(
-      `https://api.cloudflare.com/client/v4/accounts/${accountId}/workers/subdomain`,
-      {
-        headers: { "Authorization": `Bearer ${cfApiToken}` }
-      }
-    );
-    const subdomainResult = await subdomainResponse.json();
-    const subdomain = subdomainResult.result?.subdomain;
+    // 5. Build worker URL and attempt to create Custom Domain if configured
+    let workerUrl = "";
+    if (params.workerBaseDomain) {
+      const baseDomain = params.workerBaseDomain.replace(/^https?:\/\//, '').replace(/\/$/, '');
+      const hostname = `${channelSlug}.${baseDomain}`;
+      workerUrl = `https://${hostname}`;
 
-    if (!subdomain) {
-      return { success: false, error: "Cloudflare Workers subdomain not set for this account." };
+      let zoneId = "";
+      
+      // Step A: Attempt to auto-discover Zone ID from the base domain
+      try {
+        const zoneRes = await fetch(
+          `https://api.cloudflare.com/client/v4/zones?name=${baseDomain}`,
+          { headers: { "Authorization": `Bearer ${cfApiToken}` } }
+        );
+        const zoneData = await zoneRes.json();
+        if (zoneData.success && zoneData.result && zoneData.result.length > 0) {
+          zoneId = zoneData.result[0].id;
+        }
+      } catch (e) {
+        console.warn("Could not auto-discover Zone ID for custom domain:", e);
+      }
+
+      // Step B: Set up Custom Domain if we found the Zone ID
+      if (zoneId) {
+        await fetch(
+          `https://api.cloudflare.com/client/v4/accounts/${accountId}/workers/domains`,
+          {
+            method: "PUT",
+            headers: {
+              "Authorization": `Bearer ${cfApiToken}`,
+              "Content-Type": "application/json",
+            },
+            body: JSON.stringify({
+              environment: "production",
+              hostname: hostname,
+              service: scriptName,
+              zone_id: zoneId
+            }),
+          }
+        );
+      } else {
+        console.warn(`Could not set up custom domain automatically. Zone ID for ${baseDomain} not found or token lacks permissions.`);
+      }
+
+    } else {
+      const subdomainResponse = await fetch(
+        `https://api.cloudflare.com/client/v4/accounts/${accountId}/workers/subdomain`,
+        {
+          headers: { "Authorization": `Bearer ${cfApiToken}` }
+        }
+      );
+      const subdomainResult = await subdomainResponse.json();
+      const subdomain = subdomainResult.result?.subdomain;
+
+      if (!subdomain) {
+        return { success: false, error: "Cloudflare Workers subdomain not set for this account." };
+      }
+
+      workerUrl = `https://${scriptName}.${subdomain}.workers.dev`;
     }
 
     return {
       success: true,
-      workerUrl: `https://${scriptName}.${subdomain}.workers.dev`
+      workerUrl
     };
   } catch (error: any) {
     return { success: false, error: error.message };
